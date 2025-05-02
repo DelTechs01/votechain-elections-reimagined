@@ -1,73 +1,152 @@
-# Welcome to your Lovable project
 
-## Project info
+# VoteChain - Blockchain-Based Voting DApp
 
-**URL**: https://lovable.dev/projects/bf77cf6e-19dd-429f-b236-646a8d5bacdb
+VoteChain is a decentralized application that enables secure, transparent, and tamper-proof voting using blockchain technology. It features KYC verification, real-time vote tracking, and administrative capabilities for election management.
 
-## How can I edit this code?
+## Features
 
-There are several ways of editing your application.
+- **Blockchain-Based Voting**: Secure and transparent voting system
+- **KYC Verification**: Identity verification to prevent fraud
+- **Admin Dashboard**: Manage candidates, elections, and verify KYC documents
+- **Real-Time Vote Tracking**: Watch votes being counted in real-time
+- **Responsive Design**: Works on desktop and mobile devices
 
-**Use Lovable**
+## Prerequisites
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/bf77cf6e-19dd-429f-b236-646a8d5bacdb) and start prompting.
+- Node.js v14.x or later
+- npm v6.x or later
+- MongoDB v4.x or later
+- MetaMask browser extension
 
-Changes made via Lovable will be committed automatically to this repo.
+## Setup Instructions
 
-**Use your preferred IDE**
+### 1. Clone the Repository
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+```bash
+git clone <repository-url>
+cd votechain
+```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### 2. Install Dependencies
 
-Follow these steps:
+```bash
+# Install frontend dependencies
+npm install
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# Install backend dependencies
+cd src/backend
+npm install
+cd ../..
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### 3. MongoDB Setup
 
-# Step 3: Install the necessary dependencies.
-npm i
+- Install MongoDB locally or create a MongoDB Atlas account
+- Create a database named `votechain`
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### 4. Environment Configuration
+
+```bash
+# Copy example environment file
+cd src/backend
+cp .env.example .env
+```
+
+Edit the `.env` file with your MongoDB connection string and other settings:
+
+```
+MONGODB_URI=mongodb://localhost:27017/votechain
+PORT=5000
+JWT_SECRET=your_secret_here
+```
+
+### 5. Seed Initial Data
+
+```bash
+# Run the seed script to populate initial candidates
+node src/backend/scripts/seed-data.js
+```
+
+### 6. Start the Backend Server
+
+```bash
+# From the backend directory
+cd src/backend
+node server.js
+```
+
+The server will start on port 5000 (or the port specified in your .env file).
+
+### 7. Start the Frontend Development Server
+
+In a new terminal window:
+
+```bash
+# From the project root
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The frontend will start on port 3000 and open in your browser.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### 8. Connect MetaMask
 
-**Use GitHub Codespaces**
+- Install the MetaMask browser extension
+- Create or import a wallet
+- Connect to the application when prompted
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Smart Contract Integration
 
-## What technologies are used for this project?
+For complete functionality, deploy the VoteChain smart contract to an Ethereum network (local, testnet, or mainnet). Update the contract address in your environment configuration.
 
-This project is built with:
+### Required Libraries
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- **Frontend**:
+  - React.js
+  - ethers.js
+  - axios
+  - tailwindcss
+  - lucide-react
+  - sonner (for notifications)
 
-## How can I deploy this project?
+- **Backend**:
+  - express
+  - mongoose
+  - multer (for file uploads)
+  - cors
+  - dotenv
 
-Simply open [Lovable](https://lovable.dev/projects/bf77cf6e-19dd-429f-b236-646a8d5bacdb) and click on Share -> Publish.
+## Project Structure
 
-## Can I connect a custom domain to my Lovable project?
+```
+votechain/
+├── public/
+├── src/
+│   ├── backend/
+│   │   ├── scripts/
+│   │   ├── uploads/
+│   │   ├── .env
+│   │   └── server.js
+│   ├── components/
+│   ├── context/
+│   ├── pages/
+│   └── ...
+└── package.json
+```
 
-Yes, you can!
+## Real-World Data Integration
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+To use real-world data:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+1. Prepare a CSV file with candidate information (name, party, image URL)
+2. Create appropriate import scripts based on your data format
+3. Run the import scripts to populate the MongoDB database
+
+## License
+
+MIT License
+
+## Troubleshooting
+
+- **MongoDB Connection Issues**: Ensure MongoDB is running on the specified port and that your connection string is correct.
+- **MetaMask Errors**: Make sure you're connected to the correct network in MetaMask.
+- **Missing Files**: The `uploads` directory in the backend is created automatically when the first KYC document is uploaded.

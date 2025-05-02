@@ -47,6 +47,32 @@ const kycSchema = new mongoose.Schema({
 
 const KYC = mongoose.model('KYC', kycSchema);
 
+// Create Candidate model schema
+const candidateSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true
+  },
+  party: {
+    type: String,
+    required: true
+  },
+  imageUrl: {
+    type: String,
+    default: '/placeholder.svg'
+  },
+  voteCount: {
+    type: Number,
+    default: 0
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+});
+
+const Candidate = mongoose.model('Candidate', candidateSchema);
+
 // Configure storage for ID documents
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -175,6 +201,64 @@ app.put('/api/kyc/:id', async (req, res) => {
     
   } catch (error) {
     console.error('Error updating KYC status:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Candidate API endpoints
+// Get all candidates
+app.get('/api/candidates', async (req, res) => {
+  try {
+    const candidates = await Candidate.find({ isActive: true });
+    res.status(200).json(candidates);
+  } catch (error) {
+    console.error('Error fetching candidates:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Add new candidate (admin only)
+app.post('/api/candidates', async (req, res) => {
+  try {
+    const { name, party, imageUrl } = req.body;
+    
+    if (!name || !party) {
+      return res.status(400).json({ message: 'Name and party are required' });
+    }
+    
+    const newCandidate = new Candidate({
+      name,
+      party,
+      imageUrl: imageUrl || '/placeholder.svg'
+    });
+    
+    await newCandidate.save();
+    
+    res.status(201).json(newCandidate);
+  } catch (error) {
+    console.error('Error adding candidate:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update candidate vote count (this would typically be done via blockchain)
+app.put('/api/candidates/:id/vote', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const candidate = await Candidate.findByIdAndUpdate(
+      id,
+      { $inc: { voteCount: 1 } },
+      { new: true }
+    );
+    
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+    
+    res.status(200).json(candidate);
+  } catch (error) {
+    console.error('Error updating vote count:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -1,7 +1,7 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
+import axios from 'axios';
 
 // Mock ABI for the voting contract
 const VotingContractABI = [
@@ -178,54 +178,42 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
 
     try {
-      // Try to fetch from real backend first
-      try {
-        const response = await fetch(`${API_URL}/kyc/status/${account}`);
-        if (response.ok) {
-          const data = await response.json();
-          setKycStatus({
-            status: data.status,
-            feedback: data.feedback,
-            submittedAt: new Date(data.submittedAt)
-          });
-          return;
-        }
-      } catch (apiError) {
-        console.log('API not available, using mock data');
+      const response = await axios.get(`${API_URL}/kyc/status/${account}`);
+      if (response.status === 200) {
+        setKycStatus({
+          status: response.data.status,
+          feedback: response.data.feedback,
+          submittedAt: new Date(response.data.submittedAt)
+        });
       }
-
-      // Fall back to mock data if API is not available
-      // For demo purposes, randomly assign a status
-      const statuses = ['not submitted', 'pending', 'approved', 'rejected'] as const;
-      const randomIndex = Math.floor(Math.random() * statuses.length);
-      setKycStatus({ 
-        status: statuses[randomIndex], 
-        feedback: randomIndex === 3 ? 'ID document not clear. Please resubmit.' : undefined 
-      });
-    } catch (error) {
-      console.error("Error fetching KYC status:", error);
+    } catch (error: any) {
+      if (error.response && error.response.status === 404) {
+        // 404 means no KYC found, which is a normal state
+        setKycStatus({ status: 'not submitted' });
+      } else {
+        console.error("Error fetching KYC status:", error);
+        // Keep the current status in case of error
+      }
     }
   };
 
   const fetchCandidates = async () => {
     try {
-      // Try to fetch from real backend first
+      // Try to fetch from real backend
       try {
-        const response = await fetch(`${API_URL}/candidates`);
-        if (response.ok) {
-          const data = await response.json();
-          const formattedCandidates = data.map((candidate: any, index: number) => ({
-            id: candidate._id || index,
+        const response = await axios.get(`${API_URL}/candidates`);
+        if (response.status === 200) {
+          setCandidates(response.data.map((candidate: any, index: number) => ({
+            id: candidate._id || index + 1,
             name: candidate.name,
             party: candidate.party,
             imageUrl: candidate.imageUrl || '/placeholder.svg',
             voteCount: candidate.voteCount || 0
-          }));
-          setCandidates(formattedCandidates);
+          })));
           return;
         }
       } catch (apiError) {
-        console.log('Candidates API not available, using contract or mock data');
+        console.log('Candidates API not available, trying contract');
       }
 
       // If API fails, try to get from contract
@@ -252,15 +240,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         }
       }
 
-      // If both API and contract fail, use mock data
-      setTimeout(() => {
-        const mockCandidates = [
-          { id: 1, name: "Alex Johnson", party: "Progressive Party", imageUrl: "/placeholder.svg", voteCount: 125 },
-          { id: 2, name: "Sam Wilson", party: "Conservative Union", imageUrl: "/placeholder.svg", voteCount: 108 },
-          { id: 3, name: "Maria Rodriguez", party: "Liberty Alliance", imageUrl: "/placeholder.svg", voteCount: 96 },
-        ];
-        setCandidates(mockCandidates);
-      }, 500);
+      toast.error("Failed to fetch candidates. Please try again later.");
     } catch (error) {
       console.error("Error fetching candidates:", error);
       toast.error("Failed to fetch candidates.");
@@ -300,17 +280,28 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   };
 
   const addCandidate = async (name: string, party: string, imageUrl: string) => {
-    if (!contract) {
-      toast.error("Contract not initialized. Please connect your wallet.");
-      return;
-    }
-
     if (!isAdmin) {
       toast.error("Only admins can add candidates.");
       return;
     }
 
     try {
+      // Try to use the API first
+      try {
+        await axios.post(`${API_URL}/candidates`, { name, party, imageUrl });
+        toast.success("Candidate added successfully!");
+        await fetchCandidates();
+        return;
+      } catch (apiError) {
+        console.log('API not available for adding candidate, using contract');
+      }
+
+      // Fall back to contract if API fails
+      if (!contract) {
+        toast.error("Contract not initialized. Please connect your wallet.");
+        return;
+      }
+
       const tx = await contract.addCandidate(name, party, imageUrl);
       toast.info("Adding candidate... Please wait for confirmation.");
       
@@ -373,6 +364,18 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
 
     try {
+      // Try API first for demo purpose (in real app this would be done through the contract only)
+      try {
+        await axios.put(`${API_URL}/candidates/${candidateId}/vote`);
+        toast.success("Vote cast successfully!");
+        setVoterStatus({ ...voterStatus, hasVoted: true });
+        await fetchCandidates();
+        return;
+      } catch (apiError) {
+        console.log('API not available for voting, using contract');
+      }
+
+      // Fall back to contract
       const tx = await contract.castVote(candidateId);
       toast.info("Casting your vote... Please wait for confirmation.");
       
