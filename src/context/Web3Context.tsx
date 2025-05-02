@@ -67,7 +67,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   useEffect(() => {
     const init = async () => {
       // Check if MetaMask is installed
-      if (window.ethereum) {
+      if (typeof window.ethereum !== 'undefined') {
         // Create provider
         const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
         setProvider(web3Provider);
@@ -111,14 +111,14 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     
     return () => {
       // Clean up listeners when component unmounts
-      if (window.ethereum) {
+      if (typeof window.ethereum !== 'undefined') {
         window.ethereum.removeAllListeners('accountsChanged');
       }
     };
   }, []);
 
   const connectWallet = async () => {
-    if (!window.ethereum) {
+    if (typeof window.ethereum === 'undefined') {
       toast.error("MetaMask is not installed. Please install MetaMask to use this application.");
       return;
     }
