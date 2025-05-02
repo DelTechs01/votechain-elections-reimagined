@@ -62,7 +62,7 @@ interface Web3ProviderProps {
 const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 // Backend API URL - update this with your actual backend URL
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null);
