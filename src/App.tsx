@@ -12,6 +12,7 @@ import Index from "@/pages/Index";
 import Elections from "@/pages/Elections";
 import Vote from "@/pages/Vote";
 import Admin from "@/pages/Admin";
+import KYC from "@/pages/KYC";
 import NotFound from "@/pages/NotFound";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -43,6 +44,7 @@ const App = () => (
                       <Route path="/elections" element={<Elections />} />
                       <Route path="/vote" element={<Vote />} />
                       <Route path="/admin" element={<Admin />} />
+                      <Route path="/kyc" element={<KYC />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </motion.div>

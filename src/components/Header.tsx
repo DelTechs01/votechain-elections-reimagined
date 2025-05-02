@@ -54,9 +54,14 @@ export function Header() {
             Elections
           </Link>
           {account && (
-            <Link to="/vote" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-              Vote
-            </Link>
+            <>
+              <Link to="/vote" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                Vote
+              </Link>
+              <Link to="/kyc" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                KYC
+              </Link>
+            </>
           )}
           {isAdmin && (
             <Link to="/admin" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
@@ -103,13 +108,22 @@ export function Header() {
               Elections
             </Link>
             {account && (
-              <Link 
-                to="/vote" 
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-4 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Vote
-              </Link>
+              <>
+                <Link 
+                  to="/vote" 
+                  className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-4 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Vote
+                </Link>
+                <Link 
+                  to="/kyc" 
+                  className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-4 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  KYC
+                </Link>
+              </>
             )}
             {isAdmin && (
               <Link 

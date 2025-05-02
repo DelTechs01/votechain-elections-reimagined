@@ -27,6 +27,12 @@ interface VoterStatus {
   hasVoted: boolean;
 }
 
+interface KycStatus {
+  status: 'not submitted' | 'pending' | 'approved' | 'rejected';
+  feedback?: string;
+  submittedAt?: Date;
+}
+
 interface Web3ContextProps {
   account: string | null;
   isAdmin: boolean;
@@ -35,7 +41,9 @@ interface Web3ContextProps {
   connectWallet: () => Promise<void>;
   candidates: Candidate[];
   voterStatus: VoterStatus;
+  kycStatus: KycStatus;
   fetchCandidates: () => Promise<void>;
+  fetchKycStatus: () => Promise<void>;
   addCandidate: (name: string, party: string, imageUrl: string) => Promise<void>;
   castVote: (candidateId: number) => Promise<void>;
   registerVoter: (address: string) => Promise<void>;
@@ -53,6 +61,9 @@ interface Web3ProviderProps {
 // In a real dApp, you would replace this with your deployed contract address
 const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
 
+// Backend API URL - update this with your actual backend URL
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+
 export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -60,6 +71,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [voterStatus, setVoterStatus] = useState<VoterStatus>({ isRegistered: false, hasVoted: false });
+  const [kycStatus, setKycStatus] = useState<KycStatus>({ status: 'not submitted' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
@@ -77,10 +89,12 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           if (accounts.length > 0) {
             setAccount(accounts[0]);
             fetchVoterStatus();
+            fetchKycStatus();
             checkIfAdmin(accounts[0]);
           } else {
             setAccount(null);
             setIsAdmin(false);
+            setKycStatus({ status: 'not submitted' });
           }
         });
         
@@ -96,6 +110,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
             setContract(votingContract);
             
             await fetchVoterStatus();
+            await fetchKycStatus();
             await checkIfAdmin(accounts[0]);
             await fetchCandidates();
           }
@@ -142,6 +157,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         setContract(votingContract);
         
         await fetchVoterStatus();
+        await fetchKycStatus();
         await checkIfAdmin(accounts[0]);
         await fetchCandidates();
         
@@ -155,9 +171,88 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
   };
 
+  const fetchKycStatus = async () => {
+    if (!account) {
+      setKycStatus({ status: 'not submitted' });
+      return;
+    }
+
+    try {
+      // Try to fetch from real backend first
+      try {
+        const response = await fetch(`${API_URL}/kyc/status/${account}`);
+        if (response.ok) {
+          const data = await response.json();
+          setKycStatus({
+            status: data.status,
+            feedback: data.feedback,
+            submittedAt: new Date(data.submittedAt)
+          });
+          return;
+        }
+      } catch (apiError) {
+        console.log('API not available, using mock data');
+      }
+
+      // Fall back to mock data if API is not available
+      // For demo purposes, randomly assign a status
+      const statuses = ['not submitted', 'pending', 'approved', 'rejected'] as const;
+      const randomIndex = Math.floor(Math.random() * statuses.length);
+      setKycStatus({ 
+        status: statuses[randomIndex], 
+        feedback: randomIndex === 3 ? 'ID document not clear. Please resubmit.' : undefined 
+      });
+    } catch (error) {
+      console.error("Error fetching KYC status:", error);
+    }
+  };
+
   const fetchCandidates = async () => {
-    if (!contract) {
-      // For demo purposes, use mock data when no contract is available
+    try {
+      // Try to fetch from real backend first
+      try {
+        const response = await fetch(`${API_URL}/candidates`);
+        if (response.ok) {
+          const data = await response.json();
+          const formattedCandidates = data.map((candidate: any, index: number) => ({
+            id: candidate._id || index,
+            name: candidate.name,
+            party: candidate.party,
+            imageUrl: candidate.imageUrl || '/placeholder.svg',
+            voteCount: candidate.voteCount || 0
+          }));
+          setCandidates(formattedCandidates);
+          return;
+        }
+      } catch (apiError) {
+        console.log('Candidates API not available, using contract or mock data');
+      }
+
+      // If API fails, try to get from contract
+      if (contract) {
+        try {
+          const count = await contract.getCandidateCount();
+          const candidatesList: Candidate[] = [];
+          
+          for (let i = 0; i < count; i++) {
+            const [id, name, party, imageUrl, voteCount] = await contract.getCandidate(i);
+            candidatesList.push({
+              id: id.toNumber(),
+              name,
+              party,
+              imageUrl,
+              voteCount: voteCount.toNumber()
+            });
+          }
+          
+          setCandidates(candidatesList);
+          return;
+        } catch (contractError) {
+          console.error("Error fetching candidates from contract:", contractError);
+        }
+      }
+
+      // If both API and contract fail, use mock data
       setTimeout(() => {
         const mockCandidates = [
           { id: 1, name: "Alex Johnson", party: "Progressive Party", imageUrl: "/placeholder.svg", voteCount: 125 },
@@ -166,25 +261,6 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         ];
         setCandidates(mockCandidates);
       }, 500);
-      return;
-    }
-
-    try {
-      const count = await contract.getCandidateCount();
-      const candidatesList: Candidate[] = [];
-      
-      for (let i = 0; i < count; i++) {
-        const [id, name, party, imageUrl, voteCount] = await contract.getCandidate(i);
-        candidatesList.push({
-          id: id.toNumber(),
-          name,
-          party,
-          imageUrl,
-          voteCount: voteCount.toNumber()
-        });
-      }
-      
-      setCandidates(candidatesList);
     } catch (error) {
       console.error("Error fetching candidates:", error);
       toast.error("Failed to fetch candidates.");
@@ -291,6 +367,11 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
+    if (kycStatus.status !== 'approved') {
+      toast.error("Your KYC must be approved before voting.");
+      return;
+    }
+
     try {
       const tx = await contract.castVote(candidateId);
       toast.info("Casting your vote... Please wait for confirmation.");
@@ -314,7 +395,9 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     connectWallet,
     candidates,
     voterStatus,
+    kycStatus,
     fetchCandidates,
+    fetchKycStatus,
     addCandidate,
     castVote,
     registerVoter,
