@@ -10,6 +10,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Index from "@/pages/Index";
 import Elections from "@/pages/Elections";
+import ElectionDetails from "@/pages/ElectionDetails"; // Add import for the new page
 import Vote from "@/pages/Vote";
 import Admin from "@/pages/Admin";
 import KYC from "@/pages/KYC";
@@ -42,6 +43,7 @@ const App = () => (
                     <Routes>
                       <Route path="/" element={<Index />} />
                       <Route path="/elections" element={<Elections />} />
+                      <Route path="/elections/:id" element={<ElectionDetails />} /> {/* Add the new route */}
                       <Route path="/vote" element={<Vote />} />
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/kyc" element={<KYC />} />
