@@ -2,8 +2,9 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { createMetaTransaction, executeMetaTransaction } from '@/utils/metaTransactions';
 
-// Mock ABI for the voting contract
+// Enhanced ABI for the voting contract
 const VotingContractABI = [
   "function registerVoter(address _voterAddress) public",
   "function addCandidate(string memory _name, string memory _party, string memory _imageUrl) public",
@@ -11,8 +12,23 @@ const VotingContractABI = [
   "function getCandidateCount() public view returns(uint256)",
   "function getCandidate(uint256 _candidateId) public view returns(uint256, string memory, string memory, string memory, uint256)",
   "function getVoterStatus(address _voterAddress) public view returns(bool, bool)",
-  "function isAdmin(address _address) public view returns(bool)"
+  "function isAdmin(address _address) public view returns(bool)",
+  "function getNonce(address user) public view returns(uint256)",
+  "function executeMetaTransaction(address userAddress, bytes memory functionSignature, bytes32 sigR, bytes32 sigS, uint8 sigV) public returns (bytes memory)",
+  "function setElectionPeriod(uint256 _startTime, uint256 _endTime) public",
+  "function setResultsPublished(bool _published) public",
+  "function setRealTimeResults(bool _enabled) public",
+  "function disqualifyCandidate(uint256 _candidateId) public",
+  "function canViewResults(address _voterAddress) public view returns(bool)",
+  "function getElectionStatus() public view returns(uint256 startTime, uint256 endTime, bool resultsPublished, bool realTimeResults)"
 ];
+
+interface ElectionSettings {
+  startTime: number;
+  endTime: number;
+  resultsPublished: boolean;
+  realTimeResults: boolean;
+}
 
 interface Candidate {
   id: number;
@@ -20,6 +36,8 @@ interface Candidate {
   party: string;
   imageUrl: string;
   voteCount: number;
+  position: string;
+  isActive: boolean;
 }
 
 interface VoterStatus {
@@ -42,12 +60,20 @@ interface Web3ContextProps {
   candidates: Candidate[];
   voterStatus: VoterStatus;
   kycStatus: KycStatus;
+  electionSettings: ElectionSettings | null;
+  canViewResults: boolean;
   fetchCandidates: () => Promise<void>;
   fetchKycStatus: () => Promise<void>;
-  addCandidate: (name: string, party: string, imageUrl: string) => Promise<void>;
-  castVote: (candidateId: number) => Promise<void>;
+  addCandidate: (name: string, party: string, position: string, imageUrl?: string) => Promise<void>;
+  castVote: (candidateId: number, position: string) => Promise<void>;
   registerVoter: (address: string) => Promise<void>;
   fetchVoterStatus: () => Promise<void>;
+  disqualifyCandidate: (candidateId: number) => Promise<void>;
+  setElectionPeriod: (startTime: number, endTime: number) => Promise<void>;
+  setResultsPublished: (published: boolean) => Promise<void>;
+  setRealTimeResults: (enabled: boolean) => Promise<void>;
+  fetchElectionSettings: () => Promise<void>;
+  fetchCanViewResults: () => Promise<void>;
 }
 
 const Web3Context = createContext<Web3ContextProps>({} as Web3ContextProps);
@@ -59,10 +85,12 @@ interface Web3ProviderProps {
 }
 
 // In a real dApp, you would replace this with your deployed contract address
-const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
+const CONTRACT_ADDRESS = process.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 // Backend API URL - update this with your actual backend URL
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// Relayer URL
+const RELAYER_URL = `${API_URL}/relay/vote`;
 
 export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null);
@@ -74,6 +102,8 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [kycStatus, setKycStatus] = useState<KycStatus>({ status: 'not submitted' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
+  const [canViewResults, setCanViewResults] = useState(false);
 
   // Initialize provider when window loads
   useEffect(() => {
@@ -208,7 +238,9 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
             name: candidate.name,
             party: candidate.party,
             imageUrl: candidate.imageUrl || '/placeholder.svg',
-            voteCount: candidate.voteCount || 0
+            voteCount: candidate.voteCount || 0,
+            position: candidate.position || '',
+            isActive: candidate.isActive || true
           })));
           return;
         }
@@ -223,13 +255,15 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           const candidatesList: Candidate[] = [];
           
           for (let i = 0; i < count; i++) {
-            const [id, name, party, imageUrl, voteCount] = await contract.getCandidate(i);
+            const [id, name, party, imageUrl, voteCount, position, isActive] = await contract.getCandidate(i);
             candidatesList.push({
               id: id.toNumber(),
               name,
               party,
               imageUrl,
-              voteCount: voteCount.toNumber()
+              voteCount: voteCount.toNumber(),
+              position,
+              isActive
             });
           }
           
@@ -279,35 +313,105 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
   };
 
-  const addCandidate = async (name: string, party: string, imageUrl: string) => {
+  const fetchElectionSettings = async () => {
+    try {
+      // Try to fetch from API first
+      try {
+        const response = await axios.get(`${API_URL}/election/settings`);
+        if (response.status === 200) {
+          setElectionSettings({
+            startTime: new Date(response.data.startTime).getTime() / 1000,
+            endTime: new Date(response.data.endTime).getTime() / 1000,
+            resultsPublished: response.data.resultsPublished,
+            realTimeResults: response.data.realTimeResults
+          });
+          return;
+        }
+      } catch (apiError) {
+        console.log('Election settings API not available, using contract');
+      }
+
+      // Fallback to contract
+      if (contract && account) {
+        const [startTime, endTime, resultsPublished, realTimeResults] = await contract.getElectionStatus();
+        setElectionSettings({
+          startTime: startTime.toNumber(),
+          endTime: endTime.toNumber(),
+          resultsPublished,
+          realTimeResults
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching election settings:', error);
+      toast.error('Failed to fetch election settings');
+    }
+  };
+
+  const fetchCanViewResults = async () => {
+    if (!account) {
+      setCanViewResults(false);
+      return;
+    }
+
+    try {
+      // Try API first
+      try {
+        const response = await axios.get(`${API_URL}/election/can-view-results/${account}`);
+        if (response.status === 200) {
+          setCanViewResults(response.data.canView);
+          return;
+        }
+      } catch (apiError) {
+        console.log('Results visibility API not available, using contract');
+      }
+
+      // Fallback to contract
+      if (contract && account) {
+        const canView = await contract.canViewResults(account);
+        setCanViewResults(canView);
+      }
+    } catch (error) {
+      console.error('Error checking results visibility:', error);
+      setCanViewResults(false);
+    }
+  };
+
+  const addCandidate = async (name: string, party: string, position: string, imageUrl?: string) => {
     if (!isAdmin) {
       toast.error("Only admins can add candidates.");
       return;
     }
 
     try {
-      // Try to use the API first
-      try {
-        await axios.post(`${API_URL}/candidates`, { name, party, imageUrl });
-        toast.success("Candidate added successfully!");
-        await fetchCandidates();
-        return;
-      } catch (apiError) {
-        console.log('API not available for adding candidate, using contract');
-      }
-
-      // Fall back to contract if API fails
       if (!contract) {
         toast.error("Contract not initialized. Please connect your wallet.");
         return;
       }
 
-      const tx = await contract.addCandidate(name, party, imageUrl);
+      // Add candidate to blockchain first
+      const tx = await contract.addCandidate(name, party, position);
       toast.info("Adding candidate... Please wait for confirmation.");
       
-      await tx.wait();
-      toast.success("Candidate added successfully!");
+      const receipt = await tx.wait();
       
+      // Get the candidate ID from the event
+      const event = receipt.events?.find(e => e.event === 'CandidateAdded');
+      const candidateId = event?.args?.candidateId.toNumber();
+      
+      if (!candidateId) {
+        throw new Error('Failed to get candidate ID from event');
+      }
+      
+      // Then add to API with the on-chain ID
+      await axios.post(`${API_URL}/candidates`, { 
+        name, 
+        party, 
+        position, 
+        imageUrl: imageUrl || '/placeholder.svg',
+        onChainId: candidateId
+      });
+      
+      toast.success("Candidate added successfully!");
       await fetchCandidates();
     } catch (error) {
       console.error("Error adding candidate:", error);
@@ -342,9 +446,9 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
   };
 
-  const castVote = async (candidateId: number) => {
-    if (!contract) {
-      toast.error("Contract not initialized. Please connect your wallet.");
+  const castVote = async (candidateId: number, position: string) => {
+    if (!account || !provider) {
+      toast.error("Please connect your wallet to vote.");
       return;
     }
 
@@ -354,7 +458,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
 
     if (voterStatus.hasVoted) {
-      toast.error("You have already voted.");
+      toast.error("You have already voted for this position.");
       return;
     }
 
@@ -364,31 +468,181 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
 
     try {
-      // Try API first for demo purpose (in real app this would be done through the contract only)
-      try {
-        await axios.put(`${API_URL}/candidates/${candidateId}/vote`);
+      // Use gasless transactions
+      if (contract) {
+        // Get the signer
+        const signer = provider.getSigner();
+        
+        // Encode the function call
+        const functionSignature = contract.interface.encodeFunctionData(
+          'vote', [candidateId, position]
+        );
+        
+        // Get the nonce for the user
+        const nonce = await contract.getNonce(account);
+        
+        // Create meta transaction
+        const metaTx = await createMetaTransaction(
+          signer,
+          CONTRACT_ADDRESS,
+          functionSignature,
+          nonce.toNumber()
+        );
+        
+        // Send the meta transaction to the relayer
+        toast.info("Casting your vote... Please wait for confirmation.");
+        const txHash = await executeMetaTransaction(metaTx, RELAYER_URL);
+        
         toast.success("Vote cast successfully!");
-        setVoterStatus({ ...voterStatus, hasVoted: true });
+        
+        await fetchVoterStatus();
         await fetchCandidates();
-        return;
-      } catch (apiError) {
-        console.log('API not available for voting, using contract');
+        await fetchCanViewResults();
+      } else {
+        toast.error("Contract not initialized. Please connect your wallet.");
       }
-
-      // Fall back to contract
-      const tx = await contract.castVote(candidateId);
-      toast.info("Casting your vote... Please wait for confirmation.");
-      
-      await tx.wait();
-      toast.success("Vote cast successfully!");
-      
-      await fetchVoterStatus();
-      await fetchCandidates();
     } catch (error) {
       console.error("Error casting vote:", error);
       toast.error("Failed to cast vote.");
     }
   };
+
+  const disqualifyCandidate = async (candidateId: number) => {
+    if (!isAdmin) {
+      toast.error("Only admins can disqualify candidates.");
+      return;
+    }
+
+    try {
+      if (!contract) {
+        toast.error("Contract not initialized. Please connect your wallet.");
+        return;
+      }
+
+      // Disqualify on blockchain
+      const tx = await contract.disqualifyCandidate(candidateId);
+      toast.info("Disqualifying candidate... Please wait for confirmation.");
+      
+      await tx.wait();
+      
+      // Find the candidate in our list
+      const candidate = candidates.find(c => c.id === candidateId);
+      if (candidate) {
+        // Update in API
+        await axios.put(`${API_URL}/candidates/${candidate.id}/disqualify`);
+      }
+      
+      toast.success("Candidate disqualified successfully!");
+      await fetchCandidates();
+    } catch (error) {
+      console.error("Error disqualifying candidate:", error);
+      toast.error("Failed to disqualify candidate.");
+    }
+  };
+
+  const setElectionPeriod = async (startTime: number, endTime: number) => {
+    if (!isAdmin) {
+      toast.error("Only admins can set election periods.");
+      return;
+    }
+
+    try {
+      if (!contract) {
+        toast.error("Contract not initialized. Please connect your wallet.");
+        return;
+      }
+
+      // Update on blockchain
+      const tx = await contract.setElectionPeriod(startTime, endTime);
+      toast.info("Setting election period... Please wait for confirmation.");
+      
+      await tx.wait();
+      
+      // Update in API
+      await axios.post(`${API_URL}/election/settings`, { 
+        startTime: new Date(startTime * 1000),
+        endTime: new Date(endTime * 1000)
+      });
+      
+      toast.success("Election period set successfully!");
+      await fetchElectionSettings();
+    } catch (error) {
+      console.error("Error setting election period:", error);
+      toast.error("Failed to set election period.");
+    }
+  };
+
+  const setResultsPublished = async (published: boolean) => {
+    if (!isAdmin) {
+      toast.error("Only admins can publish results.");
+      return;
+    }
+
+    try {
+      if (!contract) {
+        toast.error("Contract not initialized. Please connect your wallet.");
+        return;
+      }
+
+      // Update on blockchain
+      const tx = await contract.setResultsPublished(published);
+      toast.info(`${published ? 'Publishing' : 'Hiding'} results... Please wait for confirmation.`);
+      
+      await tx.wait();
+      
+      // Update in API
+      await axios.post(`${API_URL}/election/settings`, { resultsPublished: published });
+      
+      toast.success(`Results ${published ? 'published' : 'hidden'} successfully!`);
+      await fetchElectionSettings();
+      await fetchCanViewResults();
+    } catch (error) {
+      console.error("Error setting results publication:", error);
+      toast.error(`Failed to ${published ? 'publish' : 'hide'} results.`);
+    }
+  };
+
+  const setRealTimeResults = async (enabled: boolean) => {
+    if (!isAdmin) {
+      toast.error("Only admins can change real-time results settings.");
+      return;
+    }
+
+    try {
+      if (!contract) {
+        toast.error("Contract not initialized. Please connect your wallet.");
+        return;
+      }
+
+      // Update on blockchain
+      const tx = await contract.setRealTimeResults(enabled);
+      toast.info(`${enabled ? 'Enabling' : 'Disabling'} real-time results... Please wait for confirmation.`);
+      
+      await tx.wait();
+      
+      // Update in API
+      await axios.post(`${API_URL}/election/settings`, { realTimeResults: enabled });
+      
+      toast.success(`Real-time results ${enabled ? 'enabled' : 'disabled'} successfully!`);
+      await fetchElectionSettings();
+      await fetchCanViewResults();
+    } catch (error) {
+      console.error("Error setting real-time results:", error);
+      toast.error(`Failed to ${enabled ? 'enable' : 'disable'} real-time results.`);
+    }
+  };
+
+  useEffect(() => {
+    if (account) {
+      fetchCanViewResults();
+    }
+  }, [account, electionSettings]);
+
+  useEffect(() => {
+    if (account && contract) {
+      fetchElectionSettings();
+    }
+  }, [account, contract]);
 
   const value = {
     account,
@@ -399,12 +653,20 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     candidates,
     voterStatus,
     kycStatus,
+    electionSettings,
+    canViewResults,
     fetchCandidates,
     fetchKycStatus,
     addCandidate,
     castVote,
     registerVoter,
     fetchVoterStatus,
+    disqualifyCandidate,
+    setElectionPeriod,
+    setResultsPublished,
+    setRealTimeResults,
+    fetchElectionSettings,
+    fetchCanViewResults
   };
 
   return (

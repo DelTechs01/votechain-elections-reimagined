@@ -5,11 +5,13 @@ VoteChain is a decentralized application that enables secure, transparent, and t
 
 ## Features
 
+- **Gasless Voting**: Vote without needing ETH or any tokens through meta-transactions
 - **Position-Based Voting**: Vote for candidates in different positions (President, Senator, etc.)
 - **Blockchain-Based System**: Secure and transparent voting system
 - **KYC Verification**: Identity verification to prevent fraud
 - **Admin Dashboard**: Manage positions, candidates, and verify KYC documents
 - **Real-Time Vote Tracking**: Watch votes being counted in real-time
+- **Configurable Result Visibility**: Admin can control who sees results and when
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## Prerequisites
@@ -41,7 +43,7 @@ VoteChain is a decentralized application that enables secure, transparent, and t
 - cors (for handling Cross-Origin Resource Sharing)
 - dotenv (for environment variables)
 
-### Smart Contract (Optional)
+### Smart Contract
 - Solidity
 - Hardhat or Foundry (for smart contract development)
 - OpenZeppelin Contracts (for standard contract implementations)
@@ -86,9 +88,25 @@ Edit the `.env` file with your MongoDB connection string and other settings:
 MONGODB_URI=mongodb://localhost:27017/votechain
 PORT=5000
 JWT_SECRET=your_secret_here
+PROVIDER_URL=https://goerli.base.org
+RELAYER_PRIVATE_KEY=your_private_key_here
+CONTRACT_ADDRESS=your_contract_address_here
 ```
 
-### 5. Start the Backend Server
+### 5. Smart Contract Deployment
+
+1. Deploy the `VoteChain.sol` contract to the Base Chain (or your preferred network)
+2. Update the contract address in your `.env` file
+
+```bash
+# If using Hardhat
+npx hardhat run scripts/deploy.js --network base-goerli
+
+# If using Foundry
+forge create --rpc-url https://goerli.base.org --private-key $PRIVATE_KEY src/contracts/VoteChain.sol:VoteChain
+```
+
+### 6. Start the Backend Server
 
 ```bash
 # From the backend directory
@@ -98,7 +116,7 @@ node server.js
 
 The server will start on port 5000 (or the port specified in your .env file).
 
-### 6. Start the Frontend Development Server
+### 7. Start the Frontend Development Server
 
 In a new terminal window:
 
@@ -109,113 +127,33 @@ npm run dev
 
 The frontend will start on port 3000 and open in your browser.
 
-### 7. Connect MetaMask
+### 8. Connect MetaMask
 
 - Install the MetaMask browser extension
 - Create or import a wallet
 - Connect to the application when prompted
 
-## Smart Contract Integration (Optional)
+## Admin Setup
 
-For complete blockchain functionality:
+1. Deploy the contract using your admin wallet
+2. The deploying address automatically becomes the admin
+3. Access the admin dashboard at `/admin` with your admin wallet connected
 
-1. Deploy the VoteChain smart contract to an Ethereum network (local, testnet, or mainnet)
-2. Update the contract address in your environment configuration
+## Gasless Transactions
 
-### Simple Smart Contract Example
+VoteChain uses meta-transactions to enable voting without gas fees:
 
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+1. Users sign messages with their private key
+2. Our relayer service submits the signed transaction to the blockchain
+3. The relayer pays the gas fees, allowing users to vote for free
 
-contract VoteChain {
-    struct Voter {
-        bool isRegistered;
-        mapping(string => bool) hasVotedForPosition;
-    }
-    
-    struct Candidate {
-        uint256 id;
-        string name;
-        string party;
-        string position;
-        uint256 voteCount;
-    }
-    
-    address public admin;
-    mapping(address => Voter) public voters;
-    mapping(uint256 => Candidate) public candidates;
-    uint256 public candidateCount;
-    
-    event VoteCast(address indexed voter, uint256 candidateId, string position);
-    event CandidateAdded(uint256 candidateId, string name, string position);
-    event VoterRegistered(address voterAddress);
-    
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Only admin can call this function");
-        _;
-    }
-    
-    constructor() {
-        admin = msg.sender;
-    }
-    
-    function registerVoter(address _voterAddress) public onlyAdmin {
-        voters[_voterAddress].isRegistered = true;
-        emit VoterRegistered(_voterAddress);
-    }
-    
-    function addCandidate(string memory _name, string memory _party, string memory _position) public onlyAdmin {
-        candidateCount++;
-        candidates[candidateCount] = Candidate(
-            candidateCount,
-            _name,
-            _party,
-            _position,
-            0
-        );
-        emit CandidateAdded(candidateCount, _name, _position);
-    }
-    
-    function vote(uint256 _candidateId, string memory _position) public {
-        require(voters[msg.sender].isRegistered, "Voter is not registered");
-        require(!voters[msg.sender].hasVotedForPosition[_position], "Voter already voted for this position");
-        require(_candidateId > 0 && _candidateId <= candidateCount, "Invalid candidate ID");
-        require(keccak256(abi.encodePacked(candidates[_candidateId].position)) == keccak256(abi.encodePacked(_position)), "Candidate is not running for this position");
-        
-        candidates[_candidateId].voteCount++;
-        voters[msg.sender].hasVotedForPosition[_position] = true;
-        
-        emit VoteCast(msg.sender, _candidateId, _position);
-    }
-    
-    function getVoterStatus(address _voterAddress, string memory _position) public view returns(bool, bool) {
-        return (voters[_voterAddress].isRegistered, voters[_voterAddress].hasVotedForPosition[_position]);
-    }
-    
-    function isAdmin(address _address) public view returns(bool) {
-        return _address == admin;
-    }
-}
-```
+## Security Features
 
-## Project Structure
-
-```
-votechain/
-├── public/
-├── src/
-│   ├── backend/
-│   │   ├── scripts/
-│   │   ├── uploads/
-│   │   ├── .env
-│   │   └── server.js
-│   ├── components/
-│   ├── context/
-│   ├── pages/
-│   └── ...
-└── package.json
-```
+- KYC verification for voters prevents fraud
+- Admin-only functions for critical operations
+- Vote data stored immutably on-chain
+- MongoDB for fast indexing and detailed analytics
+- Real-time synchronization between blockchain and database
 
 ## License
 
@@ -226,3 +164,4 @@ MIT License
 - **MongoDB Connection Issues**: Ensure MongoDB is running on the specified port and that your connection string is correct.
 - **MetaMask Errors**: Make sure you're connected to the correct network in MetaMask.
 - **Missing Files**: The `uploads` directory in the backend is created automatically when the first KYC document is uploaded.
+- **Relayer Errors**: Check that your relayer is properly funded with ETH to pay for gas fees.

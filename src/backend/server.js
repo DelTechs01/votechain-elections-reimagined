@@ -4,6 +4,7 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { executeMetaTransaction } = require('./relayer');
 require('dotenv').config();
 
 // Create Express app
@@ -89,6 +90,10 @@ const candidateSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  onChainId: {
+    type: Number,
+    required: true
   }
 });
 
@@ -112,8 +117,33 @@ const voteSchema = new mongoose.Schema({
   timestamp: {
     type: Date,
     default: Date.now
+  },
+  txHash: {
+    type: String
   }
 });
+
+// Add Election settings model
+const electionSettingsSchema = new mongoose.Schema({
+  startTime: {
+    type: Date,
+    required: true
+  },
+  endTime: {
+    type: Date,
+    required: true
+  },
+  resultsPublished: {
+    type: Boolean,
+    default: false
+  },
+  realTimeResults: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const ElectionSettings = mongoose.model('ElectionSettings', electionSettingsSchema);
 
 // Compound index to prevent multiple votes for the same position by the same voter
 voteSchema.index({ voterAddress: 1, position: 1 }, { unique: true });
@@ -252,7 +282,6 @@ app.put('/api/kyc/:id', async (req, res) => {
 });
 
 // Position API endpoints
-// Get all positions
 app.get('/api/positions', async (req, res) => {
   try {
     const positions = await Position.find({ isActive: true });
@@ -287,7 +316,6 @@ app.post('/api/positions', async (req, res) => {
 });
 
 // Candidate API endpoints
-// Get all candidates
 app.get('/api/candidates', async (req, res) => {
   try {
     const candidates = await Candidate.find({ isActive: true });
@@ -310,20 +338,22 @@ app.get('/api/candidates/position/:position', async (req, res) => {
   }
 });
 
-// Add new candidate (admin only)
+// Update candidate API to track on-chain ID
 app.post('/api/candidates', async (req, res) => {
   try {
-    const { name, party, position, imageUrl } = req.body;
+    const { name, party, position, imageUrl, onChainId } = req.body;
     
-    if (!name || !position) {
-      return res.status(400).json({ message: 'Name and position are required' });
+    if (!name || !position || !onChainId) {
+      return res.status(400).json({ message: 'Name, position, and onChainId are required' });
     }
     
     const newCandidate = new Candidate({
       name,
       party: party || 'Independent',
       position,
-      imageUrl: imageUrl || '/placeholder.svg'
+      imageUrl: imageUrl || '/placeholder.svg',
+      isActive: true,
+      onChainId
     });
     
     await newCandidate.save();
@@ -335,45 +365,171 @@ app.post('/api/candidates', async (req, res) => {
   }
 });
 
-// Vote API endpoints
-// Cast vote for a candidate in a position
-app.post('/api/votes', async (req, res) => {
+// API to disqualify a candidate
+app.put('/api/candidates/:id/disqualify', async (req, res) => {
   try {
-    const { voterAddress, candidateId, position } = req.body;
-    
-    if (!voterAddress || !candidateId || !position) {
-      return res.status(400).json({ message: 'Voter address, candidate ID, and position are required' });
-    }
-    
-    // Check if voter has already voted for this position
-    const existingVote = await Vote.findOne({ voterAddress, position });
-    if (existingVote) {
-      return res.status(400).json({ message: 'You have already voted for this position' });
-    }
-    
-    // Create new vote
-    const newVote = new Vote({
-      voterAddress,
-      candidateId,
-      position
-    });
-    
-    await newVote.save();
-    
-    // Increment candidate vote count
-    await Candidate.findByIdAndUpdate(
-      candidateId,
-      { $inc: { voteCount: 1 } }
+    const candidate = await Candidate.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
     );
     
-    res.status(201).json({ message: 'Vote cast successfully' });
-  } catch (error) {
-    console.error('Error casting vote:', error);
-    if (error.code === 11000) { // Duplicate key error
-      res.status(400).json({ message: 'You have already voted for this position' });
-    } else {
-      res.status(500).json({ message: 'Server error' });
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
     }
+    
+    res.status(200).json(candidate);
+  } catch (error) {
+    console.error('Error disqualifying candidate:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Relayer endpoint for gasless voting
+app.post('/api/relay/vote', async (req, res) => {
+  try {
+    const metaTx = req.body;
+    
+    // Validate the meta transaction
+    if (!metaTx.from || !metaTx.functionSignature || !metaTx.nonce || !metaTx.r || !metaTx.s || metaTx.v === undefined) {
+      return res.status(400).json({ message: 'Invalid meta transaction data' });
+    }
+    
+    // Execute the meta transaction
+    const txHash = await executeMetaTransaction(metaTx);
+    
+    // Extract the candidateId and position from the function signature
+    // Note: In a production app, you'd need a proper decoder for the function signature
+    // This is a simplified example
+    const candidateIdMatch = metaTx.functionSignature.match(/candidateId=(\d+)/);
+    const positionMatch = metaTx.functionSignature.match(/position=([^&]+)/);
+    
+    if (candidateIdMatch && positionMatch) {
+      const candidateId = candidateIdMatch[1];
+      const position = positionMatch[1];
+      
+      // Find the candidate in MongoDB
+      const candidate = await Candidate.findOne({ onChainId: parseInt(candidateId) });
+      
+      if (!candidate) {
+        return res.status(404).json({ message: 'Candidate not found' });
+      }
+      
+      // Create a vote record in MongoDB
+      const newVote = new Vote({
+        voterAddress: metaTx.from,
+        candidateId: candidate._id,
+        position: position,
+        txHash: txHash
+      });
+      
+      await newVote.save();
+      
+      // Increment candidate vote count in MongoDB
+      await Candidate.findByIdAndUpdate(
+        candidate._id,
+        { $inc: { voteCount: 1 } }
+      );
+    }
+    
+    res.status(200).json({
+      transactionHash: txHash,
+      message: 'Vote cast successfully'
+    });
+  } catch (error) {
+    console.error('Error processing meta transaction:', error);
+    res.status(500).json({ message: 'Failed to process meta transaction' });
+  }
+});
+
+// Election settings endpoints
+app.post('/api/election/settings', async (req, res) => {
+  try {
+    const { startTime, endTime, resultsPublished, realTimeResults } = req.body;
+    
+    if (!startTime || !endTime) {
+      return res.status(400).json({ message: 'Start time and end time are required' });
+    }
+    
+    // Find existing settings or create new ones
+    let settings = await ElectionSettings.findOne();
+    
+    if (settings) {
+      settings.startTime = new Date(startTime);
+      settings.endTime = new Date(endTime);
+      if (resultsPublished !== undefined) settings.resultsPublished = resultsPublished;
+      if (realTimeResults !== undefined) settings.realTimeResults = realTimeResults;
+      
+      await settings.save();
+    } else {
+      settings = new ElectionSettings({
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+        resultsPublished: resultsPublished || false,
+        realTimeResults: realTimeResults || false
+      });
+      
+      await settings.save();
+    }
+    
+    res.status(200).json(settings);
+  } catch (error) {
+    console.error('Error updating election settings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.get('/api/election/settings', async (req, res) => {
+  try {
+    const settings = await ElectionSettings.findOne();
+    
+    if (!settings) {
+      return res.status(404).json({ message: 'Election settings not found' });
+    }
+    
+    res.status(200).json(settings);
+  } catch (error) {
+    console.error('Error fetching election settings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Check if user can view results
+app.get('/api/election/can-view-results/:voterAddress', async (req, res) => {
+  try {
+    const { voterAddress } = req.params;
+    const settings = await ElectionSettings.findOne();
+    
+    if (!settings) {
+      return res.status(404).json({ message: 'Election settings not found' });
+    }
+    
+    // If results are published or real-time results are enabled, anyone can view
+    if (settings.resultsPublished || settings.realTimeResults) {
+      return res.status(200).json({ canView: true });
+    }
+    
+    // Check if the voter has voted
+    const vote = await Vote.findOne({ voterAddress });
+    
+    res.status(200).json({ canView: !!vote });
+  } catch (error) {
+    console.error('Error checking result visibility:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get all votes (admin only)
+app.get('/api/votes/all', async (req, res) => {
+  try {
+    const votes = await Vote.find()
+      .populate('candidateId', 'name party position')
+      .sort({ timestamp: -1 });
+    
+    res.status(200).json(votes);
+  } catch (error) {
+    console.error('Error fetching all votes:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
