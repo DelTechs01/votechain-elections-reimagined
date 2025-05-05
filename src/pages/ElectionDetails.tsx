@@ -71,7 +71,12 @@ const ElectionDetails = () => {
         try {
           const response = await axios.get(`${API_URL}/elections/${id}`);
           if (response.status === 200) {
-            setElection(response.data);
+            // Ensure the status is one of the allowed values
+            const data = response.data;
+            if (!["active", "upcoming", "ended"].includes(data.status)) {
+              data.status = "active"; // Default to active if not valid
+            }
+            setElection(data as ElectionData);
             
             // Calculate total votes
             const total = response.data.candidates?.reduce((sum: number, candidate: Candidate) => 
@@ -85,8 +90,8 @@ const ElectionDetails = () => {
           console.log('Elections API not available, using mock data');
         }
         
-        // Fallback to mock data
-        const mockElections = [
+        // Fallback to mock data with properly typed statuses
+        const mockElections: ElectionData[] = [
           {
             id: "presidential-2024",
             title: "2024 Presidential Election",
