@@ -14,6 +14,7 @@ import Vote from "@/pages/Vote";
 import Admin from "@/pages/Admin";
 import KYC from "@/pages/KYC";
 import NotFound from "@/pages/NotFound";
+import ElectionDetails from "./pages/ElectionDetails";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Add framer-motion dependency
