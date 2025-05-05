@@ -10,11 +10,11 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Index from "@/pages/Index";
 import Elections from "@/pages/Elections";
-import ElectionDetails from "@/pages/ElectionDetails"; // Add import for the new page
 import Vote from "@/pages/Vote";
 import Admin from "@/pages/Admin";
 import KYC from "@/pages/KYC";
 import NotFound from "@/pages/NotFound";
+import ElectionDetails from "./pages/ElectionDetails";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Add framer-motion dependency
