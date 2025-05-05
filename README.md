@@ -1,13 +1,14 @@
 
 # VoteChain - Blockchain-Based Voting DApp
 
-VoteChain is a decentralized application that enables secure, transparent, and tamper-proof voting using blockchain technology. It features KYC verification, real-time vote tracking, and administrative capabilities for election management.
+VoteChain is a decentralized application that enables secure, transparent, and tamper-proof voting using blockchain technology. It features KYC verification, position-based voting, real-time vote tracking, and administrative capabilities for election management.
 
 ## Features
 
-- **Blockchain-Based Voting**: Secure and transparent voting system
+- **Position-Based Voting**: Vote for candidates in different positions (President, Senator, etc.)
+- **Blockchain-Based System**: Secure and transparent voting system
 - **KYC Verification**: Identity verification to prevent fraud
-- **Admin Dashboard**: Manage candidates, elections, and verify KYC documents
+- **Admin Dashboard**: Manage positions, candidates, and verify KYC documents
 - **Real-Time Vote Tracking**: Watch votes being counted in real-time
 - **Responsive Design**: Works on desktop and mobile devices
 
@@ -17,6 +18,33 @@ VoteChain is a decentralized application that enables secure, transparent, and t
 - npm v6.x or later
 - MongoDB v4.x or later
 - MetaMask browser extension
+
+## Required Libraries
+
+### Frontend
+- React.js & React DOM
+- react-router-dom (for navigation)
+- ethers.js (for blockchain interactions)
+- axios (for API requests)
+- framer-motion (for animations)
+- tailwindcss (for styling)
+- shadcn/ui components
+- lucide-react (for icons)
+- recharts (for data visualization)
+- react-hook-form & zod (for form handling & validation)
+- sonner (for notifications)
+
+### Backend
+- express (for the API server)
+- mongoose (for MongoDB interactions)
+- multer (for file uploads)
+- cors (for handling Cross-Origin Resource Sharing)
+- dotenv (for environment variables)
+
+### Smart Contract (Optional)
+- Solidity
+- Hardhat or Foundry (for smart contract development)
+- OpenZeppelin Contracts (for standard contract implementations)
 
 ## Setup Instructions
 
@@ -60,14 +88,7 @@ PORT=5000
 JWT_SECRET=your_secret_here
 ```
 
-### 5. Seed Initial Data
-
-```bash
-# Run the seed script to populate initial candidates
-node src/backend/scripts/seed-data.js
-```
-
-### 6. Start the Backend Server
+### 5. Start the Backend Server
 
 ```bash
 # From the backend directory
@@ -77,7 +98,7 @@ node server.js
 
 The server will start on port 5000 (or the port specified in your .env file).
 
-### 7. Start the Frontend Development Server
+### 6. Start the Frontend Development Server
 
 In a new terminal window:
 
@@ -88,32 +109,95 @@ npm run dev
 
 The frontend will start on port 3000 and open in your browser.
 
-### 8. Connect MetaMask
+### 7. Connect MetaMask
 
 - Install the MetaMask browser extension
 - Create or import a wallet
 - Connect to the application when prompted
 
-## Smart Contract Integration
+## Smart Contract Integration (Optional)
 
-For complete functionality, deploy the VoteChain smart contract to an Ethereum network (local, testnet, or mainnet). Update the contract address in your environment configuration.
+For complete blockchain functionality:
 
-### Required Libraries
+1. Deploy the VoteChain smart contract to an Ethereum network (local, testnet, or mainnet)
+2. Update the contract address in your environment configuration
 
-- **Frontend**:
-  - React.js
-  - ethers.js
-  - axios
-  - tailwindcss
-  - lucide-react
-  - sonner (for notifications)
+### Simple Smart Contract Example
 
-- **Backend**:
-  - express
-  - mongoose
-  - multer (for file uploads)
-  - cors
-  - dotenv
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
+
+contract VoteChain {
+    struct Voter {
+        bool isRegistered;
+        mapping(string => bool) hasVotedForPosition;
+    }
+    
+    struct Candidate {
+        uint256 id;
+        string name;
+        string party;
+        string position;
+        uint256 voteCount;
+    }
+    
+    address public admin;
+    mapping(address => Voter) public voters;
+    mapping(uint256 => Candidate) public candidates;
+    uint256 public candidateCount;
+    
+    event VoteCast(address indexed voter, uint256 candidateId, string position);
+    event CandidateAdded(uint256 candidateId, string name, string position);
+    event VoterRegistered(address voterAddress);
+    
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only admin can call this function");
+        _;
+    }
+    
+    constructor() {
+        admin = msg.sender;
+    }
+    
+    function registerVoter(address _voterAddress) public onlyAdmin {
+        voters[_voterAddress].isRegistered = true;
+        emit VoterRegistered(_voterAddress);
+    }
+    
+    function addCandidate(string memory _name, string memory _party, string memory _position) public onlyAdmin {
+        candidateCount++;
+        candidates[candidateCount] = Candidate(
+            candidateCount,
+            _name,
+            _party,
+            _position,
+            0
+        );
+        emit CandidateAdded(candidateCount, _name, _position);
+    }
+    
+    function vote(uint256 _candidateId, string memory _position) public {
+        require(voters[msg.sender].isRegistered, "Voter is not registered");
+        require(!voters[msg.sender].hasVotedForPosition[_position], "Voter already voted for this position");
+        require(_candidateId > 0 && _candidateId <= candidateCount, "Invalid candidate ID");
+        require(keccak256(abi.encodePacked(candidates[_candidateId].position)) == keccak256(abi.encodePacked(_position)), "Candidate is not running for this position");
+        
+        candidates[_candidateId].voteCount++;
+        voters[msg.sender].hasVotedForPosition[_position] = true;
+        
+        emit VoteCast(msg.sender, _candidateId, _position);
+    }
+    
+    function getVoterStatus(address _voterAddress, string memory _position) public view returns(bool, bool) {
+        return (voters[_voterAddress].isRegistered, voters[_voterAddress].hasVotedForPosition[_position]);
+    }
+    
+    function isAdmin(address _address) public view returns(bool) {
+        return _address == admin;
+    }
+}
+```
 
 ## Project Structure
 
@@ -132,14 +216,6 @@ votechain/
 │   └── ...
 └── package.json
 ```
-
-## Real-World Data Integration
-
-To use real-world data:
-
-1. Prepare a CSV file with candidate information (name, party, image URL)
-2. Create appropriate import scripts based on your data format
-3. Run the import scripts to populate the MongoDB database
 
 ## License
 

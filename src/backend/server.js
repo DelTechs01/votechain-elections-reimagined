@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -47,13 +46,35 @@ const kycSchema = new mongoose.Schema({
 
 const KYC = mongoose.model('KYC', kycSchema);
 
-// Create Candidate model schema
+// Create Position model schema
+const positionSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  description: {
+    type: String
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+});
+
+const Position = mongoose.model('Position', positionSchema);
+
+// Create Candidate model schema with position field
 const candidateSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
   },
   party: {
+    type: String,
+    default: 'Independent'
+  },
+  position: {
     type: String,
     required: true
   },
@@ -72,6 +93,31 @@ const candidateSchema = new mongoose.Schema({
 });
 
 const Candidate = mongoose.model('Candidate', candidateSchema);
+
+// Create Vote model schema to track votes by position
+const voteSchema = new mongoose.Schema({
+  voterAddress: {
+    type: String,
+    required: true
+  },
+  candidateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Candidate',
+    required: true
+  },
+  position: {
+    type: String,
+    required: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Compound index to prevent multiple votes for the same position by the same voter
+voteSchema.index({ voterAddress: 1, position: 1 }, { unique: true });
+const Vote = mongoose.model('Vote', voteSchema);
 
 // Configure storage for ID documents
 const storage = multer.diskStorage({
@@ -164,7 +210,7 @@ app.get('/api/kyc/status/:walletAddress', async (req, res) => {
   }
 });
 
-// Get all KYC submissions (admin only - would need authentication in production)
+// Get all KYC submissions (admin only)
 app.get('/api/kyc/all', async (req, res) => {
   try {
     const kycSubmissions = await KYC.find().sort({ createdAt: -1 });
@@ -177,7 +223,7 @@ app.get('/api/kyc/all', async (req, res) => {
   }
 });
 
-// Update KYC status (admin only - would need authentication in production)
+// Update KYC status (admin only)
 app.put('/api/kyc/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -205,6 +251,41 @@ app.put('/api/kyc/:id', async (req, res) => {
   }
 });
 
+// Position API endpoints
+// Get all positions
+app.get('/api/positions', async (req, res) => {
+  try {
+    const positions = await Position.find({ isActive: true });
+    res.status(200).json(positions);
+  } catch (error) {
+    console.error('Error fetching positions:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Add new position (admin only)
+app.post('/api/positions', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ message: 'Position name is required' });
+    }
+    
+    const newPosition = new Position({
+      name,
+      description
+    });
+    
+    await newPosition.save();
+    
+    res.status(201).json(newPosition);
+  } catch (error) {
+    console.error('Error adding position:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Candidate API endpoints
 // Get all candidates
 app.get('/api/candidates', async (req, res) => {
@@ -217,18 +298,31 @@ app.get('/api/candidates', async (req, res) => {
   }
 });
 
+// Get candidates by position
+app.get('/api/candidates/position/:position', async (req, res) => {
+  try {
+    const { position } = req.params;
+    const candidates = await Candidate.find({ position, isActive: true });
+    res.status(200).json(candidates);
+  } catch (error) {
+    console.error('Error fetching candidates by position:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Add new candidate (admin only)
 app.post('/api/candidates', async (req, res) => {
   try {
-    const { name, party, imageUrl } = req.body;
+    const { name, party, position, imageUrl } = req.body;
     
-    if (!name || !party) {
-      return res.status(400).json({ message: 'Name and party are required' });
+    if (!name || !position) {
+      return res.status(400).json({ message: 'Name and position are required' });
     }
     
     const newCandidate = new Candidate({
       name,
-      party,
+      party: party || 'Independent',
+      position,
       imageUrl: imageUrl || '/placeholder.svg'
     });
     
@@ -241,24 +335,79 @@ app.post('/api/candidates', async (req, res) => {
   }
 });
 
-// Update candidate vote count (this would typically be done via blockchain)
-app.put('/api/candidates/:id/vote', async (req, res) => {
+// Vote API endpoints
+// Cast vote for a candidate in a position
+app.post('/api/votes', async (req, res) => {
   try {
-    const { id } = req.params;
+    const { voterAddress, candidateId, position } = req.body;
     
-    const candidate = await Candidate.findByIdAndUpdate(
-      id,
-      { $inc: { voteCount: 1 } },
-      { new: true }
-    );
-    
-    if (!candidate) {
-      return res.status(404).json({ message: 'Candidate not found' });
+    if (!voterAddress || !candidateId || !position) {
+      return res.status(400).json({ message: 'Voter address, candidate ID, and position are required' });
     }
     
-    res.status(200).json(candidate);
+    // Check if voter has already voted for this position
+    const existingVote = await Vote.findOne({ voterAddress, position });
+    if (existingVote) {
+      return res.status(400).json({ message: 'You have already voted for this position' });
+    }
+    
+    // Create new vote
+    const newVote = new Vote({
+      voterAddress,
+      candidateId,
+      position
+    });
+    
+    await newVote.save();
+    
+    // Increment candidate vote count
+    await Candidate.findByIdAndUpdate(
+      candidateId,
+      { $inc: { voteCount: 1 } }
+    );
+    
+    res.status(201).json({ message: 'Vote cast successfully' });
   } catch (error) {
-    console.error('Error updating vote count:', error);
+    console.error('Error casting vote:', error);
+    if (error.code === 11000) { // Duplicate key error
+      res.status(400).json({ message: 'You have already voted for this position' });
+    } else {
+      res.status(500).json({ message: 'Server error' });
+    }
+  }
+});
+
+// Check voter status (if they've voted for specific positions)
+app.get('/api/votes/status/:voterAddress', async (req, res) => {
+  try {
+    const { voterAddress } = req.params;
+    
+    const votes = await Vote.find({ voterAddress });
+    const positions = await Position.find({ isActive: true });
+    
+    const votedPositions = votes.map(vote => vote.position);
+    
+    const voterStatus = positions.map(position => ({
+      position: position.name,
+      hasVoted: votedPositions.includes(position.name)
+    }));
+    
+    res.status(200).json(voterStatus);
+  } catch (error) {
+    console.error('Error checking voter status:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get election results (by position)
+app.get('/api/results/:position', async (req, res) => {
+  try {
+    const { position } = req.params;
+    const candidates = await Candidate.find({ position, isActive: true }).sort({ voteCount: -1 });
+    
+    res.status(200).json(candidates);
+  } catch (error) {
+    console.error('Error fetching election results:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
