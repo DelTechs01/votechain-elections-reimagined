@@ -51,6 +51,9 @@ export const executeMetaTransaction = async (
   relayerUrl: string
 ): Promise<string> => {
   try {
+    console.log(`Sending meta transaction to relayer: ${relayerUrl}`);
+    console.log(`Transaction data:`, JSON.stringify(metaTx, null, 2));
+    
     const response = await fetch(relayerUrl, {
       method: 'POST',
       headers: {
@@ -59,11 +62,13 @@ export const executeMetaTransaction = async (
       body: JSON.stringify(metaTx),
     });
     
-    const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.message || 'Failed to execute meta transaction');
+      const errorText = await response.text();
+      console.error(`Error response from relayer (${response.status}):`, errorText);
+      throw new Error(`Failed to execute meta transaction: ${response.status} ${response.statusText}`);
     }
     
+    const data = await response.json();
     return data.transactionHash;
   } catch (error) {
     console.error('Error executing meta transaction:', error);
