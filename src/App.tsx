@@ -10,7 +10,6 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Index from "@/pages/Index";
 import Elections from "@/pages/Elections";
-import ElectionDetails from "@/pages/ElectionDetails"; // Add import for the new page
 import Vote from "@/pages/Vote";
 import Admin from "@/pages/Admin";
 import KYC from "@/pages/KYC";
