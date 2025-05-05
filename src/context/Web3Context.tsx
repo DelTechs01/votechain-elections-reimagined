@@ -84,10 +84,10 @@ interface Web3ProviderProps {
   children: ReactNode;
 }
 
-// In a real dApp, you would replace this with your deployed contract address
-const CONTRACT_ADDRESS = process.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
+// Use import.meta.env instead of process.env for Vite
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
 
-// Backend API URL - update this with your actual backend URL
+// Backend API URL - update with import.meta.env
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 // Relayer URL
 const RELAYER_URL = `${API_URL}/relay/vote`;

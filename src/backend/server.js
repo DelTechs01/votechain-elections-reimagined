@@ -12,14 +12,56 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.ENABLE_CORS === 'true' ? '*' : process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json());
 
+<<<<<<< HEAD
 // Connect to MongoDB
 mongoose
   .connect(process.env.MONGODB_URI || "mongodb://localhost:27017/votechain")
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("Failed to connect to MongoDB:", err));
+=======
+// Improved MongoDB connection with retry logic
+const connectWithRetry = () => {
+  console.log('MongoDB connection with retry');
+  const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/votechain';
+  
+  mongoose.connect(mongoURI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log('MongoDB connected successfully');
+    console.log(`Using database: ${mongoURI}`);
+  })
+  .catch(err => {
+    console.error('MongoDB connection error:', err);
+    console.log('Retrying in 5 seconds...');
+    setTimeout(connectWithRetry, 5000);
+  });
+};
+
+// Initial connection attempt
+connectWithRetry();
+
+// Monitor connection for errors
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err);
+  setTimeout(connectWithRetry, 5000);
+});
+
+// Handle server shutdown gracefully
+process.on('SIGINT', () => {
+  mongoose.connection.close(() => {
+    console.log('MongoDB connection closed due to app termination');
+    process.exit(0);
+  });
+});
+>>>>>>> bbd201934e532daf4c7d163f05ec29686d4a6f06
 
 // Schemas
 const kycSchema = new mongoose.Schema({
@@ -453,7 +495,23 @@ app.get("/api/results/:position", async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/api/healthcheck', (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  res.status(200).json({
+    status: 'ok',
+    message: 'Server is running',
+    dbStatus,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+<<<<<<< HEAD
 });
+=======
+  console.log(`API URL: http://localhost:${PORT}/api`);
+});
+>>>>>>> bbd201934e532daf4c7d163f05ec29686d4a6f06
