@@ -4,7 +4,7 @@ const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { executeMetaTransaction } = require("./relayer");
+
 require("dotenv").config();
 
 // Create Express app
@@ -18,13 +18,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-<<<<<<< HEAD
-// Connect to MongoDB
-mongoose
-  .connect(process.env.MONGODB_URI || "mongodb://localhost:27017/votechain")
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("Failed to connect to MongoDB:", err));
-=======
 // Improved MongoDB connection with retry logic
 const connectWithRetry = () => {
   console.log('MongoDB connection with retry');
@@ -61,7 +54,7 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
->>>>>>> bbd201934e532daf4c7d163f05ec29686d4a6f06
+
 
 // Schemas
 const kycSchema = new mongoose.Schema({
@@ -78,7 +71,9 @@ const positionSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
 });
 
+
 const candidateSchema = new mongoose.Schema({
+
   name: { type: String, required: true },
   party: { type: String, default: "Independent" },
   position: { type: mongoose.Schema.Types.ObjectId, ref: "Position", required: true },
@@ -137,6 +132,7 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
+
       cb(new Error("Only JPEG, PNG, and PDF files are allowed"));
     }
   },
@@ -150,8 +146,11 @@ app.post("/api/kyc/submit", upload.single("idDocument"), async (req, res) => {
       return res.status(400).json({ error: "Missing wallet address or ID document" });
     }
     const existingKYC = await KYC.findOne({ walletAddress });
+    
     if (existingKYC) {
       fs.unlinkSync(req.file.path);
+      
+    // Create new KYC entry
       return res.status(400).json({ error: "KYC already submitted for this wallet" });
     }
     const newKYC = new KYC({
@@ -159,6 +158,7 @@ app.post("/api/kyc/submit", upload.single("idDocument"), async (req, res) => {
       idPath: req.file.path,
       status: "pending",
     });
+
     await newKYC.save();
     res.status(201).json({ message: "KYC submitted successfully", status: "pending" });
   } catch (error) {
@@ -181,6 +181,8 @@ app.get("/api/kyc/status/:walletAddress", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching KYC status:", error);
+
+// Update KYC status (admin only - would need authentication in production)
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -199,6 +201,10 @@ app.put("/api/kyc/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status, feedback } = req.body;
+
+ // Candidate API endpoints
+// Get all candidates
+
     if (!["pending", "approved", "rejected"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
@@ -260,6 +266,7 @@ app.get("/api/candidates", async (req, res) => {
     res.status(200).json(candidates);
   } catch (error) {
     console.error("Error fetching candidates:", error);
+    
     res.status(500).json({ error: "Failed to fetch candidates" });
   }
 });
@@ -343,6 +350,7 @@ app.put("/api/candidates/:id/disqualify", async (req, res) => {
       { isActive: false },
       { new: true }
     );
+
     if (!candidate) {
       return res.status(404).json({ error: "Candidate not found" });
     }
@@ -509,9 +517,5 @@ app.get('/api/healthcheck', (req, res) => {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-<<<<<<< HEAD
-});
-=======
   console.log(`API URL: http://localhost:${PORT}/api`);
 });
->>>>>>> bbd201934e532daf4c7d163f05ec29686d4a6f06
