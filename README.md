@@ -1,14 +1,17 @@
 
 # VoteChain - Blockchain-Based Voting DApp
 
-VoteChain is a decentralized application that enables secure, transparent, and tamper-proof voting using blockchain technology. It features KYC verification, real-time vote tracking, and administrative capabilities for election management.
+VoteChain is a decentralized application that enables secure, transparent, and tamper-proof voting using blockchain technology. It features KYC verification, position-based voting, real-time vote tracking, and administrative capabilities for election management.
 
 ## Features
 
-- **Blockchain-Based Voting**: Secure and transparent voting system
+- **Gasless Voting**: Vote without needing ETH or any tokens through meta-transactions
+- **Position-Based Voting**: Vote for candidates in different positions (President, Senator, etc.)
+- **Blockchain-Based System**: Secure and transparent voting system
 - **KYC Verification**: Identity verification to prevent fraud
-- **Admin Dashboard**: Manage candidates, elections, and verify KYC documents
+- **Admin Dashboard**: Manage positions, candidates, and verify KYC documents
 - **Real-Time Vote Tracking**: Watch votes being counted in real-time
+- **Configurable Result Visibility**: Admin can control who sees results and when
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## Prerequisites
@@ -17,6 +20,33 @@ VoteChain is a decentralized application that enables secure, transparent, and t
 - npm v6.x or later
 - MongoDB v4.x or later
 - MetaMask browser extension
+
+## Required Libraries
+
+### Frontend
+- React.js & React DOM
+- react-router-dom (for navigation)
+- ethers.js (for blockchain interactions)
+- axios (for API requests)
+- framer-motion (for animations)
+- tailwindcss (for styling)
+- shadcn/ui components
+- lucide-react (for icons)
+- recharts (for data visualization)
+- react-hook-form & zod (for form handling & validation)
+- sonner (for notifications)
+
+### Backend
+- express (for the API server)
+- mongoose (for MongoDB interactions)
+- multer (for file uploads)
+- cors (for handling Cross-Origin Resource Sharing)
+- dotenv (for environment variables)
+
+### Smart Contract
+- Solidity
+- Hardhat or Foundry (for smart contract development)
+- OpenZeppelin Contracts (for standard contract implementations)
 
 ## Setup Instructions
 
@@ -58,13 +88,22 @@ Edit the `.env` file with your MongoDB connection string and other settings:
 MONGODB_URI=mongodb://localhost:27017/votechain
 PORT=5000
 JWT_SECRET=your_secret_here
+PROVIDER_URL=https://goerli.base.org
+RELAYER_PRIVATE_KEY=your_private_key_here
+CONTRACT_ADDRESS=your_contract_address_here
 ```
 
-### 5. Seed Initial Data
+### 5. Smart Contract Deployment
+
+1. Deploy the `VoteChain.sol` contract to the Base Chain (or your preferred network)
+2. Update the contract address in your `.env` file
 
 ```bash
-# Run the seed script to populate initial candidates
-node src/backend/scripts/seed-data.js
+# If using Hardhat
+npx hardhat run scripts/deploy.js --network base-goerli
+
+# If using Foundry
+forge create --rpc-url https://goerli.base.org --private-key $PRIVATE_KEY src/contracts/VoteChain.sol:VoteChain
 ```
 
 ### 6. Start the Backend Server
@@ -94,52 +133,27 @@ The frontend will start on port 3000 and open in your browser.
 - Create or import a wallet
 - Connect to the application when prompted
 
-## Smart Contract Integration
+## Admin Setup
 
-For complete functionality, deploy the VoteChain smart contract to an Ethereum network (local, testnet, or mainnet). Update the contract address in your environment configuration.
+1. Deploy the contract using your admin wallet
+2. The deploying address automatically becomes the admin
+3. Access the admin dashboard at `/admin` with your admin wallet connected
 
-### Required Libraries
+## Gasless Transactions
 
-- **Frontend**:
-  - React.js
-  - ethers.js
-  - axios
-  - tailwindcss
-  - lucide-react
-  - sonner (for notifications)
+VoteChain uses meta-transactions to enable voting without gas fees:
 
-- **Backend**:
-  - express
-  - mongoose
-  - multer (for file uploads)
-  - cors
-  - dotenv
+1. Users sign messages with their private key
+2. Our relayer service submits the signed transaction to the blockchain
+3. The relayer pays the gas fees, allowing users to vote for free
 
-## Project Structure
+## Security Features
 
-```
-votechain/
-├── public/
-├── src/
-│   ├── backend/
-│   │   ├── scripts/
-│   │   ├── uploads/
-│   │   ├── .env
-│   │   └── server.js
-│   ├── components/
-│   ├── context/
-│   ├── pages/
-│   └── ...
-└── package.json
-```
-
-## Real-World Data Integration
-
-To use real-world data:
-
-1. Prepare a CSV file with candidate information (name, party, image URL)
-2. Create appropriate import scripts based on your data format
-3. Run the import scripts to populate the MongoDB database
+- KYC verification for voters prevents fraud
+- Admin-only functions for critical operations
+- Vote data stored immutably on-chain
+- MongoDB for fast indexing and detailed analytics
+- Real-time synchronization between blockchain and database
 
 ## License
 
@@ -150,3 +164,4 @@ MIT License
 - **MongoDB Connection Issues**: Ensure MongoDB is running on the specified port and that your connection string is correct.
 - **MetaMask Errors**: Make sure you're connected to the correct network in MetaMask.
 - **Missing Files**: The `uploads` directory in the backend is created automatically when the first KYC document is uploaded.
+- **Relayer Errors**: Check that your relayer is properly funded with ETH to pay for gas fees.

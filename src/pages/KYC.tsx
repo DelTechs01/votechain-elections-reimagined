@@ -10,17 +10,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Camera, Upload, Image, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const KYCPage = () => {
-  const { account } = useWeb3();
+  const { account, fetchKycStatus, kycStatus } = useWeb3();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [kycStatus, setKycStatus] = useState<'not submitted' | 'pending' | 'approved' | 'rejected'>('not submitted');
-  const [kycFeedback, setKycFeedback] = useState<string | null>(null);
-  const [submittedAt, setSubmittedAt] = useState<Date | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,25 +30,7 @@ const KYCPage = () => {
     if (account) {
       fetchKycStatus();
     }
-  }, [account]);
-
-  const fetchKycStatus = async () => {
-    if (!account) return;
-
-    try {
-      const response = await axios.get(`${API_URL}/kyc/status/${account}`);
-      if (response.status === 200) {
-        setKycStatus(response.data.status);
-        setKycFeedback(response.data.feedback || null);
-        setSubmittedAt(response.data.submittedAt ? new Date(response.data.submittedAt) : null);
-      }
-    } catch (error) {
-      if ((error as any)?.response?.status !== 404) {
-        console.error('Error fetching KYC status:', error);
-      }
-      // 404 is normal if user hasn't submitted KYC yet
-    }
-  };
+  }, [account, fetchKycStatus]);
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,8 +151,7 @@ const KYCPage = () => {
       const response = await axios.post(`${API_URL}/kyc/submit`, formData);
       
       toast.success('KYC submitted successfully! Your ID is being verified.');
-      setKycStatus('pending');
-      setSubmittedAt(new Date());
+      fetchKycStatus();
       
       // Clear form
       setFile(null);
@@ -186,46 +165,60 @@ const KYCPage = () => {
     }
   };
 
+  const renderGaslessTransactionInfo = () => {
+    return (
+      <Alert className="mb-6">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>No gas fees required</AlertTitle>
+        <AlertDescription>
+          Our system uses gasless transactions, so you don't need ETH or any tokens to vote. Simply verify your identity through KYC, and you'll be able to vote without any transaction fees.
+        </AlertDescription>
+      </Alert>
+    );
+  };
+
   const renderKYCStatusTab = () => {
     return (
       <div className="space-y-6">
+        {renderGaslessTransactionInfo()}
+
         <div className="flex items-center gap-4">
           <div className="flex-shrink-0">
-            {kycStatus === 'approved' && <CheckCircle className="h-10 w-10 text-green-500" />}
-            {kycStatus === 'rejected' && <AlertCircle className="h-10 w-10 text-red-500" />}
-            {kycStatus === 'pending' && <Clock className="h-10 w-10 text-yellow-500" />}
-            {kycStatus === 'not submitted' && <AlertCircle className="h-10 w-10 text-gray-400" />}
+            {kycStatus.status === 'approved' && <CheckCircle className="h-10 w-10 text-green-500" />}
+            {kycStatus.status === 'rejected' && <AlertCircle className="h-10 w-10 text-red-500" />}
+            {kycStatus.status === 'pending' && <Clock className="h-10 w-10 text-yellow-500" />}
+            {kycStatus.status === 'not submitted' && <AlertCircle className="h-10 w-10 text-gray-400" />}
           </div>
           <div>
             <h3 className="text-lg font-medium">
-              {kycStatus === 'approved' && 'KYC Approved'}
-              {kycStatus === 'rejected' && 'KYC Rejected'}
-              {kycStatus === 'pending' && 'KYC Pending Review'}
-              {kycStatus === 'not submitted' && 'KYC Not Submitted'}
+              {kycStatus.status === 'approved' && 'KYC Approved'}
+              {kycStatus.status === 'rejected' && 'KYC Rejected'}
+              {kycStatus.status === 'pending' && 'KYC Pending Review'}
+              {kycStatus.status === 'not submitted' && 'KYC Not Submitted'}
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              {kycStatus === 'approved' && 'Your identity has been verified. You can now participate in elections.'}
-              {kycStatus === 'rejected' && 'Your KYC was rejected. Please see feedback below.'}
-              {kycStatus === 'pending' && 'Your KYC is currently under review. This process may take 24-48 hours.'}
-              {kycStatus === 'not submitted' && 'Please submit your KYC to participate in elections.'}
+              {kycStatus.status === 'approved' && 'Your identity has been verified. You can now participate in elections without paying gas fees.'}
+              {kycStatus.status === 'rejected' && 'Your KYC was rejected. Please see feedback below.'}
+              {kycStatus.status === 'pending' && 'Your KYC is currently under review. This process may take 24-48 hours.'}
+              {kycStatus.status === 'not submitted' && 'Please submit your KYC to participate in elections.'}
             </p>
           </div>
         </div>
 
-        {submittedAt && (
+        {kycStatus.submittedAt && (
           <div className="text-sm text-slate-600 dark:text-slate-400">
-            <p>Submitted on: {submittedAt.toLocaleDateString()} at {submittedAt.toLocaleTimeString()}</p>
+            <p>Submitted on: {new Date(kycStatus.submittedAt).toLocaleDateString()} at {new Date(kycStatus.submittedAt).toLocaleTimeString()}</p>
           </div>
         )}
 
-        {kycFeedback && (
+        {kycStatus.feedback && (
           <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-md">
             <p className="font-medium mb-1">Feedback:</p>
-            <p>{kycFeedback}</p>
+            <p>{kycStatus.feedback}</p>
           </div>
         )}
 
-        {kycStatus === 'rejected' && (
+        {kycStatus.status === 'rejected' && (
           <div className="text-center pt-4">
             <Button onClick={() => document.getElementById('upload-tab')?.click()}>
               Submit New KYC
@@ -233,7 +226,7 @@ const KYCPage = () => {
           </div>
         )}
 
-        {kycStatus === 'not submitted' && (
+        {kycStatus.status === 'not submitted' && (
           <div className="text-center pt-4">
             <Button onClick={() => document.getElementById('upload-tab')?.click()}>
               Submit KYC Now
@@ -241,7 +234,7 @@ const KYCPage = () => {
           </div>
         )}
 
-        {kycStatus === 'approved' && (
+        {kycStatus.status === 'approved' && (
           <div className="text-center pt-4">
             <Button onClick={() => navigate('/elections')}>
               View Elections
@@ -255,19 +248,19 @@ const KYCPage = () => {
   return (
     <div className="container max-w-4xl py-10">
       <h1 className="text-3xl font-bold mb-6 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-teal-500">
-        KYC Verification
+        KYC Verification for Gasless Voting
       </h1>
       
       <Card className="backdrop-blur-sm bg-white/50 dark:bg-slate-900/50 border border-slate-200/50 dark:border-slate-800/50 shadow-lg">
         <CardHeader>
           <CardTitle>Identity Verification</CardTitle>
           <CardDescription>
-            To vote in elections, we need to verify your identity. Please upload or capture a photo of your ID document.
+            To vote in elections without paying gas fees, we need to verify your identity. Please upload or capture a photo of your ID document.
           </CardDescription>
         </CardHeader>
         
         <CardContent>
-          <Tabs defaultValue={kycStatus !== 'not submitted' ? 'status' : 'upload'}>
+          <Tabs defaultValue={kycStatus.status !== 'not submitted' ? 'status' : 'upload'}>
             <TabsList className="grid w-full grid-cols-2 mb-6">
               <TabsTrigger value="status" id="status-tab">
                 <CheckCircle className="mr-2 h-4 w-4" />
@@ -284,6 +277,8 @@ const KYCPage = () => {
             </TabsContent>
             
             <TabsContent value="upload">
+              {renderGaslessTransactionInfo()}
+              
               <form onSubmit={handleSubmit}>
                 <Tabs defaultValue="upload" className="mb-6">
                   <TabsList className="grid w-full grid-cols-2">
@@ -373,7 +368,7 @@ const KYCPage = () => {
                 <div className="mt-6">
                   <Button 
                     type="submit" 
-                    disabled={!file || isSubmitting || !account || kycStatus === 'approved' || kycStatus === 'pending'} 
+                    disabled={!file || isSubmitting || !account || kycStatus.status === 'approved' || kycStatus.status === 'pending'} 
                     className="w-full"
                   >
                     {isSubmitting ? 'Submitting...' : 'Submit ID for Verification'}
@@ -385,13 +380,13 @@ const KYCPage = () => {
                     </p>
                   )}
                   
-                  {kycStatus === 'pending' && (
+                  {kycStatus.status === 'pending' && (
                     <p className="text-sm text-yellow-500 mt-2">
                       Your KYC is already under review. Please wait for approval.
                     </p>
                   )}
                   
-                  {kycStatus === 'approved' && (
+                  {kycStatus.status === 'approved' && (
                     <p className="text-sm text-green-500 mt-2">
                       Your KYC is already approved. No need to submit again.
                     </p>
