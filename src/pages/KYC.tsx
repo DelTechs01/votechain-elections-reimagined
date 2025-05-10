@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWeb3 } from '@/context/Web3Context';
@@ -6,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Camera, Upload, Image, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Camera, Upload, Image, FileText, CheckCircle, AlertCircle, Clock, X } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from 'axios';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -16,13 +15,27 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const KYCPage = () => {
   const { account, fetchKycStatus, kycStatus } = useWeb3();
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [files, setFiles] = useState({
+    idFront: null,
+    idBack: null,
+    profilePicture: null,
+  });
+  const [previews, setPreviews] = useState({
+    idFront: null,
+    idBack: null,
+    profilePicture: null,
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [currentCaptureType, setCurrentCaptureType] = useState(null); // 'idFront', 'idBack', or 'profilePicture'
+  const fileInputRefs = {
+    idFront: useRef(null),
+    idBack: useRef(null),
+    profilePicture: useRef(null),
+  };
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const navigate = useNavigate();
 
   // Fetch KYC status on component mount or when account changes
@@ -32,8 +45,15 @@ const KYCPage = () => {
     }
   }, [account, fetchKycStatus]);
 
+  // Cleanup camera on component unmount
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
   // Handle file selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (type) => (e) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       
@@ -50,39 +70,50 @@ const KYCPage = () => {
         return;
       }
       
-      setFile(selectedFile);
+      setFiles(prev => ({ ...prev, [type]: selectedFile }));
       
       // Generate preview for images
       if (selectedFile.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = (event) => {
-          setPreview(event.target?.result as string);
+          setPreviews(prev => ({ ...prev, [type]: event.target?.result }));
         };
         reader.readAsDataURL(selectedFile);
       } else {
-        // For PDF, show a generic icon
-        setPreview(null);
+        setPreviews(prev => ({ ...prev, [type]: null }));
       }
     }
   };
 
   // Handle camera access
-  const startCamera = async () => {
+  const startCamera = async (type) => {
+    setIsCameraLoading(true);
+    setCurrentCaptureType(type);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'user', // Use front camera as requested
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        setIsCameraActive(true);
+        setIsCameraOpen(true);
+        toast.info(`Position your ${type === 'idFront' ? 'ID front' : type === 'idBack' ? 'ID back' : 'profile picture'} clearly within the frame`);
       }
     } catch (err) {
-      toast.error('Failed to access camera');
+      toast.error('Failed to access camera. Please ensure camera permissions are enabled.');
       console.error('Error accessing camera:', err);
+      setCurrentCaptureType(null);
+    } finally {
+      setIsCameraLoading(false);
     }
   };
 
   // Capture image from camera
   const captureImage = () => {
-    if (videoRef.current && canvasRef.current) {
+    if (videoRef.current && canvasRef.current && currentCaptureType) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       
@@ -98,17 +129,15 @@ const KYCPage = () => {
         // Convert canvas to file
         canvas.toBlob((blob) => {
           if (blob) {
-            const capturedFile = new File([blob], 'id-capture.jpg', { type: 'image/jpeg' });
-            setFile(capturedFile);
-            setPreview(canvas.toDataURL('image/jpeg'));
+            const capturedFile = new File([blob], `${currentCaptureType}-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            setFiles(prev => ({ ...prev, [currentCaptureType]: capturedFile }));
+            setPreviews(prev => ({ ...prev, [currentCaptureType]: canvas.toDataURL('image/jpeg', 0.8) }));
+            toast.success(`${currentCaptureType === 'idFront' ? 'ID front' : currentCaptureType === 'idBack' ? 'ID back' : 'Profile picture'} captured successfully!`);
             
-            // Stop camera stream
-            const stream = video.srcObject as MediaStream;
-            if (stream) {
-              stream.getTracks().forEach(track => track.stop());
-              video.srcObject = null;
-              setIsCameraActive(false);
-            }
+            // Close camera
+            stopCamera();
+            setIsCameraOpen(false);
+            setCurrentCaptureType(null);
           }
         }, 'image/jpeg', 0.8);
       }
@@ -118,15 +147,16 @@ const KYCPage = () => {
   // Stop camera stream
   const stopCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
+      const stream = videoRef.current.srcObject;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
-      setIsCameraActive(false);
     }
+    setIsCameraOpen(false);
+    setCurrentCaptureType(null);
   };
 
   // Handle form submission
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!account) {
@@ -134,8 +164,8 @@ const KYCPage = () => {
       return;
     }
     
-    if (!file) {
-      toast.error('Please upload or capture an ID document');
+    if (!files.idFront || !files.idBack) {
+      toast.error('Please provide both front and back ID documents');
       return;
     }
     
@@ -144,22 +174,34 @@ const KYCPage = () => {
     try {
       // Create form data
       const formData = new FormData();
-      formData.append('idDocument', file);
+      formData.append('idFront', files.idFront);
+      formData.append('idBack', files.idBack);
+      if (files.profilePicture) {
+        formData.append('profilePicture', files.profilePicture);
+      }
       formData.append('walletAddress', account);
       
       // Send to backend API
-      const response = await axios.post(`${API_URL}/kyc/submit`, formData);
+      const response = await axios.post(`${API_URL}/kyc/submit`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
       
-      toast.success('KYC submitted successfully! Your ID is being verified.');
+      toast.success(response.data.message || 'KYC submitted successfully! Your ID is being verified.');
       fetchKycStatus();
       
       // Clear form
-      setFile(null);
-      setPreview(null);
+      setFiles({ idFront: null, idBack: null, profilePicture: null });
+      setPreviews({ idFront: null, idBack: null, profilePicture: null });
+      Object.values(fileInputRefs).forEach(ref => {
+        if (ref.current) ref.current.value = '';
+      });
       
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error submitting KYC:', error);
-      toast.error(error.response?.data?.message || 'Failed to submit KYC. Please try again.');
+      const errorMessage = error.response?.data?.error || 'Failed to submit KYC. Please try again.';
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -245,6 +287,43 @@ const KYCPage = () => {
     );
   };
 
+  const renderCameraModal = () => {
+    if (!isCameraOpen) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-6 w-full max-w-lg">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">
+              Capture {currentCaptureType === 'idFront' ? 'ID Front' : currentCaptureType === 'idBack' ? 'ID Back' : 'Profile Picture'}
+            </h3>
+            <Button variant="ghost" onClick={stopCamera}>
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+          <div className="relative bg-black rounded-lg overflow-hidden">
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              className="w-full rounded-lg"
+            />
+            <div className="absolute inset-0 border-2 border-dashed border-white/50 m-4 pointer-events-none" />
+          </div>
+          <div className="mt-4 flex space-x-2">
+            <Button onClick={captureImage} className="flex-1">
+              <Image className="mr-2 h-4 w-4" />
+              Capture
+            </Button>
+            <Button onClick={stopCamera} variant="outline" className="flex-1">
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="container max-w-4xl py-10">
       <h1 className="text-3xl font-bold mb-6 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-teal-500">
@@ -255,7 +334,7 @@ const KYCPage = () => {
         <CardHeader>
           <CardTitle>Identity Verification</CardTitle>
           <CardDescription>
-            To vote in elections without paying gas fees, we need to verify your identity. Please upload or capture a photo of your ID document.
+            To vote in elections without paying gas fees, please upload or capture photos of both the front and back of your ID document. A profile picture is optional.
           </CardDescription>
         </CardHeader>
         
@@ -280,123 +359,159 @@ const KYCPage = () => {
               {renderGaslessTransactionInfo()}
               
               <form onSubmit={handleSubmit}>
-                <Tabs defaultValue="upload" className="mb-6">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="upload">
-                      <Upload className="mr-2 h-4 w-4" />
-                      Upload ID
-                    </TabsTrigger>
-                    <TabsTrigger value="camera">
-                      <Camera className="mr-2 h-4 w-4" />
-                      Use Camera
-                    </TabsTrigger>
-                  </TabsList>
-                  
-                  <TabsContent value="upload">
-                    <div className="space-y-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="idDocument">Upload ID Document</Label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            id="idDocument"
-                            type="file"
-                            ref={fileInputRef}
-                            accept=".jpg,.jpeg,.png,.pdf"
-                            onChange={handleFileChange}
-                            className="file:mr-4 file:px-4 file:py-2 file:rounded-lg file:border-0 file:text-sm file:bg-blue-500 file:text-white hover:file:bg-blue-600"
-                          />
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Accepted formats: JPG, PNG, PDF (max 5MB)
-                        </p>
+                <div className="space-y-6">
+                  {/* ID Front */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="idFront">ID Document (Front)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="idFront"
+                        type="file"
+                        ref={fileInputRefs.idFront}
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        onChange={handleFileChange('idFront')}
+                        className="file:mr-4 file:px-4 file:py-2 file:rounded-lg file:border-0 file:text-sm file:bg-blue-500 file:text-white hover:file:bg-blue-600"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => startCamera('idFront')}
+                        disabled={isCameraLoading}
+                        variant="outline"
+                      >
+                        <Camera className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Accepted formats: JPG, PNG, PDF (max 5MB)
+                    </p>
+                    {previews.idFront ? (
+                      <div className="mt-2">
+                        <img src={previews.idFront} alt="ID Front Preview" className="max-h-40 rounded-lg border" />
                       </div>
-                    </div>
-                  </TabsContent>
-                  
-                  <TabsContent value="camera">
-                    <div className="space-y-4">
-                      {!isCameraActive ? (
-                        <Button type="button" onClick={startCamera} className="w-full">
-                          <Camera className="mr-2 h-4 w-4" />
-                          Start Camera
-                        </Button>
-                      ) : (
-                        <div className="space-y-4">
-                          <div className="relative bg-black rounded-lg overflow-hidden">
-                            <video 
-                              ref={videoRef} 
-                              autoPlay 
-                              playsInline 
-                              className="w-full rounded-lg"
-                            />
-                          </div>
-                          <div className="flex space-x-2">
-                            <Button type="button" onClick={captureImage} className="flex-1">
-                              <Image className="mr-2 h-4 w-4" />
-                              Capture
-                            </Button>
-                            <Button type="button" onClick={stopCamera} variant="outline" className="flex-1">
-                              Stop Camera
-                            </Button>
-                          </div>
+                    ) : files.idFront && (
+                      <div className="mt-2 flex items-center p-2 rounded-lg border bg-muted">
+                        <FileText className="h-6 w-6 mr-2 text-blue-500" />
+                        <div>
+                          <p className="text-sm font-medium">{files.idFront.name}</p>
+                          <p className="text-xs text-muted-foreground">{(files.idFront.size / 1024).toFixed(1)} KB</p>
                         </div>
-                      )}
-                      <canvas ref={canvasRef} className="hidden" />
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                      </div>
+                    )}
+                  </div>
 
-                {preview && (
+                  {/* ID Back */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="idBack">ID Document (Back)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="idBack"
+                        type="file"
+                        ref={fileInputRefs.idBack}
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        onChange={handleFileChange('idBack')}
+                        className="file:mr-4 file:px-4 file:py-2 file:rounded-lg file:border-0 file:text-sm file:bg-blue-500 file:text-white hover:file:bg-blue-600"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => startCamera('idBack')}
+                        disabled={isCameraLoading}
+                        variant="outline"
+                      >
+                        <Camera className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Accepted formats: JPG, PNG, PDF (max 5MB)
+                    </p>
+                    {previews.idBack ? (
+                      <div className="mt-2">
+                        <img src={previews.idBack} alt="ID Back Preview" className="max-h-40 rounded-lg border" />
+                      </div>
+                    ) : files.idBack && (
+                      <div className="mt-2 flex items-center p-2 rounded-lg border bg-muted">
+                        <FileText className="h-6 w-6 mr-2 text-blue-500" />
+                        <div>
+                          <p className="text-sm font-medium">{files.idBack.name}</p>
+                          <p className="text-xs text-muted-foreground">{(files.idBack.size / 1024).toFixed(1)} KB</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Profile Picture (Optional) */}
+                  <div className="grid gap-2">
+                    <Label htmlFor="profilePicture">Profile Picture (Optional)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="profilePicture"
+                        type="file"
+                        ref={fileInputRefs.profilePicture}
+                        accept=".jpg,.jpeg,.png"
+                        onChange={handleFileChange('profilePicture')}
+                        className="file:mr-4 file:px-4 file:py-2 file:rounded-lg file:border-0 file:text-sm file:bg-blue-500 file:text-white hover:file:bg-blue-600"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => startCamera('profilePicture')}
+                        disabled={isCameraLoading}
+                        variant="outline"
+                      >
+                        <Camera className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Accepted formats: JPG, PNG (max 5MB)
+                    </p>
+                    {previews.profilePicture && (
+                      <div className="mt-2">
+                        <img src={previews.profilePicture} alt="Profile Picture Preview" className="max-h-40 rounded-lg border" />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="mt-6">
-                    <h3 className="font-medium mb-2">Preview</h3>
-                    <div className="relative max-h-80 w-full overflow-hidden rounded-lg border bg-muted">
-                      <img src={preview} alt="ID Preview" className="object-contain w-full h-full" />
-                    </div>
+                    <Button 
+                      type="submit" 
+                      disabled={
+                        !files.idFront || 
+                        !files.idBack || 
+                        isSubmitting || 
+                        !account || 
+                        kycStatus.status === 'approved' || 
+                        kycStatus.status === 'pending'
+                      } 
+                      className="w-full"
+                    >
+                      {isSubmitting ? 'Submitting...' : 'Submit ID for Verification'}
+                    </Button>
+                    
+                    {!account && (
+                      <p className="text-sm text-red-500 mt-2">
+                        Please connect your wallet to submit KYC.
+                      </p>
+                    )}
+                    
+                    {kycStatus.status === 'pending' && (
+                      <p className="text-sm text-yellow-500 mt-2">
+                        Your KYC is already under review. Please wait for approval.
+                      </p>
+                    )}
+                    
+                    {kycStatus.status === 'approved' && (
+                      <p className="text-sm text-green-500 mt-2">
+                        Your KYC is already approved. No need to submit again.
+                      </p>
+                    )}
                   </div>
-                )}
-                
-                {file && !preview && (
-                  <div className="mt-6 flex items-center p-4 rounded-lg border bg-muted">
-                    <FileText className="h-10 w-10 mr-2 text-blue-500" />
-                    <div>
-                      <p className="font-medium">{file.name}</p>
-                      <p className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="mt-6">
-                  <Button 
-                    type="submit" 
-                    disabled={!file || isSubmitting || !account || kycStatus.status === 'approved' || kycStatus.status === 'pending'} 
-                    className="w-full"
-                  >
-                    {isSubmitting ? 'Submitting...' : 'Submit ID for Verification'}
-                  </Button>
-                  
-                  {!account && (
-                    <p className="text-sm text-red-500 mt-2">
-                      Please connect your wallet to submit KYC.
-                    </p>
-                  )}
-                  
-                  {kycStatus.status === 'pending' && (
-                    <p className="text-sm text-yellow-500 mt-2">
-                      Your KYC is already under review. Please wait for approval.
-                    </p>
-                  )}
-                  
-                  {kycStatus.status === 'approved' && (
-                    <p className="text-sm text-green-500 mt-2">
-                      Your KYC is already approved. No need to submit again.
-                    </p>
-                  )}
                 </div>
               </form>
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
+
+      {renderCameraModal()}
+      <canvas ref={canvasRef} className="hidden" />
     </div>
   );
 };

@@ -1,9 +1,8 @@
-
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/context/ThemeProvider";
 import Web3Provider from "@/context/Web3Context";
 import Header from "@/components/Header";
@@ -16,9 +15,6 @@ import KYC from "@/pages/KYC";
 import NotFound from "@/pages/NotFound";
 import ElectionDetails from "./pages/ElectionDetails";
 import { motion, AnimatePresence } from "framer-motion";
-
-// Add framer-motion dependency
-import "framer-motion";
 
 const queryClient = new QueryClient();
 
@@ -35,6 +31,7 @@ const App = () => (
               <main className="flex-grow">
                 <AnimatePresence mode="wait">
                   <motion.div
+                    key={location.pathname}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -43,8 +40,9 @@ const App = () => (
                     <Routes>
                       <Route path="/" element={<Index />} />
                       <Route path="/elections" element={<Elections />} />
-                      <Route path="/elections/:id" element={<ElectionDetails />} /> {/* Add the new route */}
-                      <Route path="/vote" element={<Vote />} />
+                      <Route path="/elections/:id" element={<ElectionDetails />} />
+                      <Route path="/vote" element={<Navigate to="/elections" replace />} /> {/* Redirect /vote to /elections */}
+                      <Route path="/vote/:electionId" element={<Vote />} />
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/kyc" element={<KYC />} />
                       <Route path="*" element={<NotFound />} />
