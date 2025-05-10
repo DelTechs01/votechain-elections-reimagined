@@ -26,7 +26,7 @@ logger.configure({
 });
 
 // Validate environment variables
-const requiredEnvVars = ["MONGODB_URI", "PORT", "FRONTEND_URL", "ENABLE_CORS"];
+const requiredEnvVars = ["MONGODB_URI", "PORT", "ENABLE_CORS"];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
   logger.error(`Missing environment variables: ${missingEnvVars.join(", ")}`);
