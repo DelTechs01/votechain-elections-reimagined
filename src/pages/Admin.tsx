@@ -1,3 +1,4 @@
+import CandidatesPanel from "../components/admin/CandidatesPanel";
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
@@ -16,12 +17,7 @@ import {
 } from "lucide-react";
 import { useWeb3 } from "@/context/Web3Context";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -31,12 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Form,
   FormControl,
@@ -63,90 +54,110 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 // Zod validation schemas
-const positionSchema = z.object({
-  name: z.string().min(1, "Position name is required"),
-  description: z.string().optional(),
-});
+// const positionSchema = z.object({
+//   name: z.string().min(1, "Position name is required"),
+//   description: z.string().optional(),
+// });
 
-const candidateSchema = z.object({
-  name: z.string().min(1, "Candidate name is required"),
-  party: z.string().optional(),
-  position: z.string().min(1, "Position is required"),
-  imageUrl: z.string().url("Must be a valid URL").optional(),
-});
+// const candidateSchema = z.object({
+//   name: z.string().min(1, "Candidate name is required"),
+//   party: z.string().optional(),
+//   position: z.string().min(1, "Position is required"),
+//   imageUrl: z.string().url("Must be a valid URL").optional(),
+// });
 
-const kycUpdateSchema = z.object({
-  status: z.enum(["approved", "rejected"]),
-  feedback: z.string().optional(),
-});
+// const kycUpdateSchema = z.object({
+//   status: z.enum(["approved", "rejected"]),
+//   feedback: z.string().optional(),
+// });
 
-const electionSchema = z.object({
-  title: z.string().min(1, "Election title is required"),
-  description: z.string().optional(),
-  startDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid start date" }),
-  endDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid end date" }),
-  candidateIds: z.array(z.string()).min(1, "At least one candidate is required"),
-});
+// const electionSchema = z.object({
+//   title: z.string().min(1, "Election title is required"),
+//   description: z.string().optional(),
+//   startDate: z
+//     .string()
+//     .refine((val) => !isNaN(Date.parse(val)), {
+//       message: "Invalid start date",
+//     }),
+//   endDate: z
+//     .string()
+//     .refine((val) => !isNaN(Date.parse(val)), { message: "Invalid end date" }),
+//   candidateIds: z
+//     .array(z.string())
+//     .min(1, "At least one candidate is required"),
+// });
 
 // Types
-interface Position {
-  _id: string;
-  name: string;
-  description?: string;
-}
+// interface Position {
+//   _id: string;
+//   name: string;
+//   description?: string;
+// }
 
-interface Candidate {
-  _id: string;
-  name: string;
-  party: string;
-  position: Position | string;
-  imageUrl: string;
-  voteCount: number;
-}
+// interface Candidate {
+//   _id: string;
+//   name: string;
+//   party: string;
+//   position: Position | string;
+//   imageUrl: string;
+//   voteCount: number;
+// }
 
-interface KYCSubmission {
-  _id: string;
-  walletAddress: string;
-  status: "pending" | "approved" | "rejected";
-  createdAt: string;
-  feedback?: string;
-  history?: { status: string; feedback?: string; updatedAt: string }[];
-}
+// interface KYCSubmission {
+//   _id: string;
+//   walletAddress: string;
+//   status: "pending" | "approved" | "rejected";
+//   createdAt: string;
+//   feedback?: string;
+//   history?: { status: string; feedback?: string; updatedAt: string }[];
+// }
 
-interface Election {
-  _id: string;
-  title: string;
-  description?: string;
-  startDate: string;
-  endDate: string;
-  status: "upcoming" | "active" | "ended";
-  candidates: Candidate[];
-  votersCount: number;
-  participantsCount: number;
-}
+// interface Election {
+//   _id: string;
+//   title: string;
+//   description?: string;
+//   startDate: string;
+//   endDate: string;
+//   status: "upcoming" | "active" | "ended";
+//   candidates: Candidate[];
+//   votersCount: number;
+//   participantsCount: number;
+// }
 
 const Admin = () => {
   const { account, isAdmin } = useWeb3();
   const queryClient = useQueryClient();
   const [isAddingPosition, setIsAddingPosition] = useState(false);
-  const [isAddingCandidate, setIsAddingCandidate] = useState(false);
-  const [isEditingCandidate, setIsEditingCandidate] = useState(false);
-  const [isDeletingCandidate, setIsDeletingCandidate] = useState(false);
+  // const [isAddingCandidate, setIsAddingCandidate] = useState(false);
+  // const [isEditingCandidate, setIsEditingCandidate] = useState(false);
+  // const [isDeletingCandidate, setIsDeletingCandidate] = useState(false);
   const [isAddingElection, setIsAddingElection] = useState(false);
   const [selectedKyc, setSelectedKyc] = useState<KYCSubmission | null>(null);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  // const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
+    // null);
 
   // Forms
   const positionForm = useForm<z.infer<typeof positionSchema>>({
@@ -154,10 +165,15 @@ const Admin = () => {
     defaultValues: { name: "", description: "" },
   });
 
-  const candidateForm = useForm<z.infer<typeof candidateSchema>>({
-    resolver: zodResolver(candidateSchema),
-    defaultValues: { name: "", party: "Independent", position: "", imageUrl: "/placeholder.svg" },
-  });
+  // const candidateForm = useForm<z.infer<typeof candidateSchema>>({
+  //   resolver: zodResolver(candidateSchema),
+  //   defaultValues: {
+  //     name: "",
+  //     party: "Independent",
+  //     position: "",
+  //     imageUrl: "/placeholder.svg",
+  //   },
+  // });
 
   const kycForm = useForm<z.infer<typeof kycUpdateSchema>>({
     resolver: zodResolver(kycUpdateSchema),
@@ -166,7 +182,13 @@ const Admin = () => {
 
   const electionForm = useForm<z.infer<typeof electionSchema>>({
     resolver: zodResolver(electionSchema),
-    defaultValues: { title: "", description: "", startDate: "", endDate: "", candidateIds: [] },
+    defaultValues: {
+      title: "",
+      description: "",
+      startDate: "",
+      endDate: "",
+      candidateIds: [],
+    },
   });
 
   // Fetch data with React Query
@@ -195,29 +217,33 @@ const Admin = () => {
   });
 
   // KYC Documents
-  const [documentPreviews, setDocumentPreviews] = useState<{ [key: string]: string }>({});
+  const [documentPreviews, setDocumentPreviews] = useState<{
+    [key: string]: string;
+  }>({});
   const [documentError, setDocumentError] = useState<string | null>(null);
-  const fetchKycDocuments = useCallback(
-    async (kycId: string) => {
-      setDocumentError(null);
-      try {
-        const response = await axios.get(`${API_URL}/kyc/${kycId}/documents`, { timeout: 10000 });
-        const previews: { [key: string]: string } = {};
-        response.data.forEach((doc: { type: string; data: string; mimetype: string }) => {
+  const fetchKycDocuments = useCallback(async (kycId: string) => {
+    setDocumentError(null);
+    try {
+      const response = await axios.get(`${API_URL}/kyc/${kycId}/documents`, {
+        timeout: 10000,
+      });
+      const previews: { [key: string]: string } = {};
+      response.data.forEach(
+        (doc: { type: string; data: string; mimetype: string }) => {
           previews[doc.type] = `data:${doc.mimetype};base64,${doc.data}`;
-        });
-        setDocumentPreviews(previews);
-      } catch (error) {
-        setDocumentError("Failed to load KYC documents");
-        setDocumentPreviews({});
-      }
-    },
-    []
-  );
+        }
+      );
+      setDocumentPreviews(previews);
+    } catch (error) {
+      setDocumentError("Failed to load KYC documents");
+      setDocumentPreviews({});
+    }
+  }, []);
 
   // Mutations
   const addPosition = useMutation({
-    mutationFn: (values: z.infer<typeof positionSchema>) => axios.post(`${API_URL}/positions`, values),
+    mutationFn: (values: z.infer<typeof positionSchema>) =>
+      axios.post(`${API_URL}/positions`, values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["positions"] });
       toast.success("Position added successfully");
@@ -230,7 +256,8 @@ const Admin = () => {
   });
 
   const addCandidate = useMutation({
-    mutationFn: (values: z.infer<typeof candidateSchema>) => axios.post(`${API_URL}/candidates`, values),
+    mutationFn: (values: z.infer<typeof candidateSchema>) =>
+      axios.post(`${API_URL}/candidates`, values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate added successfully");
@@ -258,7 +285,8 @@ const Admin = () => {
   });
 
   const deleteCandidate = useMutation({
-    mutationFn: (candidateId: string) => axios.delete(`${API_URL}/candidates/${candidateId}`),
+    mutationFn: (candidateId: string) =>
+      axios.delete(`${API_URL}/candidates/${candidateId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate deleted successfully");
@@ -285,7 +313,8 @@ const Admin = () => {
   });
 
   const addElection = useMutation({
-    mutationFn: (values: z.infer<typeof electionSchema>) => axios.post(`${API_URL}/elections`, values),
+    mutationFn: (values: z.infer<typeof electionSchema>) =>
+      axios.post(`${API_URL}/elections`, values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["elections"] });
       toast.success("Election created successfully");
@@ -304,7 +333,12 @@ const Admin = () => {
     }
   }, [account]);
 
-  if (isLoadingPositions || isLoadingCandidates || isLoadingKyc || isLoadingElections) {
+  if (
+    isLoadingPositions ||
+    isLoadingCandidates ||
+    isLoadingKyc ||
+    isLoadingElections
+  ) {
     return (
       <div className="container mx-auto px-4 py-12 flex justify-center">
         <div className="animate-pulse flex flex-col items-center">
@@ -364,482 +398,7 @@ const Admin = () => {
 
             {/* Candidates Management */}
             <TabsContent value="candidates">
-              <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-2xl font-semibold">Candidates</h2>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button className="flex items-center gap-2">
-                      <Plus className="h-4 w-4" />
-                      Add Candidate
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Add Candidate</DialogTitle>
-                      <DialogDescription>Enter candidate details.</DialogDescription>
-                    </DialogHeader>
-                    <Form {...candidateForm}>
-                      <form
-                        onSubmit={candidateForm.handleSubmit((values) => addCandidate.mutate(values))}
-                        className="space-y-6"
-                      >
-                        <FormField
-                          control={candidateForm.control}
-                          name="name"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Name</FormLabel>
-                              <FormControl>
-                                <Input placeholder="Jane Doe" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={candidateForm.control}
-                          name="party"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Party</FormLabel>
-                              <FormControl>
-                                <Input placeholder="Independent" {...field} />
-                              </FormControl>
-                              <FormDescription>Optional, defaults to Independent.</FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={candidateForm.control}
-                          name="position"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Position</FormLabel>
-                              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select position" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {positions.map((position) => (
-                                    <SelectItem key={position._id} value={position._id}>
-                                      {position.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormDescription>
-                                {!positions.length && (
-                                  <span className="text-destructive">Create positions first.</span>
-                                )}
-                              </FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={candidateForm.control}
-                          name="imageUrl"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Image URL</FormLabel>
-                              <FormControl>
-                                <Input placeholder="https://example.com/image.jpg" {...field} />
-                              </FormControl>
-                              <FormDescription>Optional, defaults to placeholder.</FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <DialogFooter>
-                          <Button
-                            type="submit"
-                            disabled={isAddingCandidate || !positions.length}
-                            className="w-full sm:w-auto"
-                          >
-                            {isAddingCandidate ? "Adding..." : "Add Candidate"}
-                          </Button>
-                        </DialogFooter>
-                      </form>
-                    </Form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-
-              <Card>
-                <CardContent className="p-0">
-                  <div className="hidden md:block">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Photo</TableHead>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Party</TableHead>
-                          <TableHead>Position</TableHead>
-                          <TableHead>Votes</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {candidates.length ? (
-                          candidates.map((candidate) => (
-                            <TableRow key={candidate._id}>
-                              <TableCell>
-                                <img
-                                  src={candidate.imageUrl}
-                                  alt={candidate.name}
-                                  className="h-10 w-10 rounded-full object-cover"
-                                />
-                              </TableCell>
-                              <TableCell className="font-medium">{candidate.name}</TableCell>
-                              <TableCell>{candidate.party}</TableCell>
-                              <TableCell>
-                                {typeof candidate.position === "object"
-                                  ? candidate.position.name
-                                  : candidate.position}
-                              </TableCell>
-                              <TableCell>{candidate.voteCount}</TableCell>
-                              <TableCell>
-                                <div className="flex gap-2">
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => {
-                                              setSelectedCandidate(candidate);
-                                              candidateForm.reset({
-                                                name: candidate.name,
-                                                party: candidate.party,
-                                                position:
-                                                  typeof candidate.position === "object"
-                                                    ? candidate.position._id
-                                                    : candidate.position,
-                                                imageUrl: candidate.imageUrl,
-                                              });
-                                            }}
-                                          >
-                                            <Pencil className="h-4 w-4" />
-                                          </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Edit</TooltipContent>
-                                      </Tooltip>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                      <DialogHeader>
-                                        <DialogTitle>Edit Candidate</DialogTitle>
-                                        <DialogDescription>Update {candidate.name}'s details.</DialogDescription>
-                                      </DialogHeader>
-                                      <Form {...candidateForm}>
-                                        <form
-                                          onSubmit={candidateForm.handleSubmit((values) =>
-                                            updateCandidate.mutate(values)
-                                          )}
-                                          className="space-y-6"
-                                        >
-                                          <FormField
-                                            control={candidateForm.control}
-                                            name="name"
-                                            render={({ field }) => (
-                                              <FormItem>
-                                                <FormLabel>Name</FormLabel>
-                                                <FormControl>
-                                                  <Input placeholder="Jane Doe" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                              </FormItem>
-                                            )}
-                                          />
-                                          <FormField
-                                            control={candidateForm.control}
-                                            name="party"
-                                            render={({ field }) => (
-                                              <FormItem>
-                                                <FormLabel>Party</FormLabel>
-                                                <FormControl>
-                                                  <Input placeholder="Independent" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                              </FormItem>
-                                            )}
-                                          />
-                                          <FormField
-                                            control={candidateForm.control}
-                                            name="position"
-                                            render={({ field }) => (
-                                              <FormItem>
-                                                <FormLabel>Position</FormLabel>
-                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                  <FormControl>
-                                                    <SelectTrigger>
-                                                      <SelectValue placeholder="Select position" />
-                                                    </SelectTrigger>
-                                                  </FormControl>
-                                                  <SelectContent>
-                                                    {positions.map((position) => (
-                                                      <SelectItem key={position._id} value={position._id}>
-                                                        {position.name}
-                                                      </SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                                <FormMessage />
-                                              </FormItem>
-                                            )}
-                                          />
-                                          <FormField
-                                            control={candidateForm.control}
-                                            name="imageUrl"
-                                            render={({ field }) => (
-                                              <FormItem>
-                                                <FormLabel>Image URL</FormLabel>
-                                                <FormControl>
-                                                  <Input placeholder="https://example.com/image.jpg" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                              </FormItem>
-                                            )}
-                                          />
-                                          <DialogFooter>
-                                            <Button
-                                              type="submit"
-                                              disabled={isEditingCandidate || !positions.length}
-                                              className="w-full sm:w-auto"
-                                            >
-                                              {isEditingCandidate ? "Updating..." : "Update Candidate"}
-                                            </Button>
-                                          </DialogFooter>
-                                        </form>
-                                      </Form>
-                                    </DialogContent>
-                                  </Dialog>
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <Button variant="outline" size="sm">
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent>Delete</TooltipContent>
-                                      </Tooltip>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                      <DialogHeader>
-                                        <DialogTitle>Delete Candidate</DialogTitle>
-                                        <DialogDescription>
-                                          Are you sure you want to delete {candidate.name}?
-                                        </DialogDescription>
-                                      </DialogHeader>
-                                      <DialogFooter>
-                                        <Button
-                                          variant="destructive"
-                                          onClick={() => deleteCandidate.mutate(candidate._id)}
-                                          disabled={isDeletingCandidate}
-                                          className="w-full sm:w-auto"
-                                        >
-                                          {isDeletingCandidate ? "Deleting..." : "Delete"}
-                                        </Button>
-                                        <Button variant="outline" className="w-full sm:w-auto">
-                                          Cancel
-                                        </Button>
-                                      </DialogFooter>
-                                    </DialogContent>
-                                  </Dialog>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={6} className="text-center py-4 text-slate-500">
-                              No candidates found.
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div className="md:hidden space-y-4 p-4">
-                    {candidates.length ? (
-                      candidates.map((candidate) => (
-                        <Card key={candidate._id}>
-                          <CardContent className="p-4 flex flex-col gap-4">
-                            <div className="flex items-center gap-4">
-                              <img
-                                src={candidate.imageUrl}
-                                alt={candidate.name}
-                                className="h-12 w-12 rounded-full object-cover"
-                              />
-                              <div>
-                                <p className="font-medium">{candidate.name}</p>
-                                <p className="text-sm text-slate-500">{candidate.party}</p>
-                              </div>
-                            </div>
-                            <div>
-                              <p className="text-sm text-slate-500">Position</p>
-                              <p>
-                                {typeof candidate.position === "object"
-                                  ? candidate.position.name
-                                  : candidate.position}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-slate-500">Votes</p>
-                              <p>{candidate.voteCount}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedCandidate(candidate);
-                                      candidateForm.reset({
-                                        name: candidate.name,
-                                        party: candidate.party,
-                                        position:
-                                          typeof candidate.position === "object"
-                                            ? candidate.position._id
-                                            : candidate.position,
-                                        imageUrl: candidate.imageUrl,
-                                      });
-                                    }}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                  <DialogHeader>
-                                    <DialogTitle>Edit Candidate</DialogTitle>
-                                    <DialogDescription>Update {candidate.name}'s details.</DialogDescription>
-                                  </DialogHeader>
-                                  <Form {...candidateForm}>
-                                    <form
-                                      onSubmit={candidateForm.handleSubmit((values) =>
-                                        updateCandidate.mutate(values)
-                                      )}
-                                      className="space-y-6"
-                                    >
-                                      <FormField
-                                        control={candidateForm.control}
-                                        name="name"
-                                        render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Name</FormLabel>
-                                            <FormControl>
-                                              <Input placeholder="Jane Doe" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}
-                                      />
-                                      <FormField
-                                        control={candidateForm.control}
-                                        name="party"
-                                        render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Party</FormLabel>
-                                            <FormControl>
-                                              <Input placeholder="Independent" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}
-                                      />
-                                      <FormField
-                                        control={candidateForm.control}
-                                        name="position"
-                                        render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Position</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                              <FormControl>
-                                                <SelectTrigger>
-                                                  <SelectValue placeholder="Select position" />
-                                                </SelectTrigger>
-                                              </FormControl>
-                                              <SelectContent>
-                                                {positions.map((position) => (
-                                                  <SelectItem key={position._id} value={position._id}>
-                                                    {position.name}
-                                                  </SelectItem>
-                                                ))}
-                                              </SelectContent>
-                                            </Select>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}
-                                      />
-                                      <FormField
-                                        control={candidateForm.control}
-                                        name="imageUrl"
-                                        render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Image URL</FormLabel>
-                                            <FormControl>
-                                              <Input placeholder="https://example.com/image.jpg" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}
-                                      />
-                                      <DialogFooter>
-                                        <Button
-                                          type="submit"
-                                          disabled={isEditingCandidate || !positions.length}
-                                          className="w-full"
-                                        >
-                                          {isEditingCandidate ? "Updating..." : "Update Candidate"}
-                                        </Button>
-                                      </DialogFooter>
-                                    </form>
-                                  </Form>
-                                </DialogContent>
-                              </Dialog>
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button variant="outline" size="sm">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                  <DialogHeader>
-                                    <DialogTitle>Delete Candidate</DialogTitle>
-                                    <DialogDescription>
-                                      Are you sure you want to delete {candidate.name}?
-                                    </DialogDescription>
-                                  </DialogHeader>
-                                  <DialogFooter>
-                                    <Button
-                                      variant="destructive"
-                                      onClick={() => deleteCandidate.mutate(candidate._id)}
-                                      disabled={isDeletingCandidate}
-                                      className="w-full"
-                                    >
-                                      {isDeletingCandidate ? "Deleting..." : "Delete"}
-                                    </Button>
-                                    <Button variant="outline" className="w-full">
-                                      Cancel
-                                    </Button>
-                                  </DialogFooter>
-                                </DialogContent>
-                              </Dialog>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))
-                    ) : (
-                      <p className="text-center py-4 text-slate-500">No candidates found.</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+              <CandidatesPanel />
             </TabsContent>
 
             {/* Positions Management */}
@@ -856,11 +415,15 @@ const Admin = () => {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add Position</DialogTitle>
-                      <DialogDescription>Enter position details.</DialogDescription>
+                      <DialogDescription>
+                        Enter position details.
+                      </DialogDescription>
                     </DialogHeader>
                     <Form {...positionForm}>
                       <form
-                        onSubmit={positionForm.handleSubmit((values) => addPosition.mutate(values))}
+                        onSubmit={positionForm.handleSubmit((values) =>
+                          addPosition.mutate(values)
+                        )}
                         className="space-y-6"
                       >
                         <FormField
@@ -890,7 +453,11 @@ const Admin = () => {
                           )}
                         />
                         <DialogFooter>
-                          <Button type="submit" disabled={isAddingPosition} className="w-full sm:w-auto">
+                          <Button
+                            type="submit"
+                            disabled={isAddingPosition}
+                            className="w-full sm:w-auto"
+                          >
                             {isAddingPosition ? "Adding..." : "Add Position"}
                           </Button>
                         </DialogFooter>
@@ -922,15 +489,22 @@ const Admin = () => {
                             ).length;
                             return (
                               <TableRow key={position._id}>
-                                <TableCell className="font-medium">{position.name}</TableCell>
-                                <TableCell>{position.description || "—"}</TableCell>
+                                <TableCell className="font-medium">
+                                  {position.name}
+                                </TableCell>
+                                <TableCell>
+                                  {position.description || "—"}
+                                </TableCell>
                                 <TableCell>{candidateCount}</TableCell>
                               </TableRow>
                             );
                           })
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={3} className="text-center py-4 text-slate-500">
+                            <TableCell
+                              colSpan={3}
+                              className="text-center py-4 text-slate-500"
+                            >
                               No positions found.
                             </TableCell>
                           </TableRow>
@@ -955,11 +529,15 @@ const Admin = () => {
                                 <p className="font-medium">{position.name}</p>
                               </div>
                               <div>
-                                <p className="text-sm text-slate-500">Description</p>
+                                <p className="text-sm text-slate-500">
+                                  Description
+                                </p>
                                 <p>{position.description || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-sm text-slate-500">Candidates</p>
+                                <p className="text-sm text-slate-500">
+                                  Candidates
+                                </p>
                                 <p>{candidateCount}</p>
                               </div>
                             </CardContent>
@@ -967,7 +545,9 @@ const Admin = () => {
                         );
                       })
                     ) : (
-                      <p className="text-center py-4 text-slate-500">No positions found.</p>
+                      <p className="text-center py-4 text-slate-500">
+                        No positions found.
+                      </p>
                     )}
                   </div>
                 </CardContent>
@@ -1000,11 +580,14 @@ const Admin = () => {
                                 {kyc.walletAddress}
                               </TableCell>
                               <TableCell>
-                                {new Date(kyc.createdAt).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })}
+                                {new Date(kyc.createdAt).toLocaleDateString(
+                                  "en-US",
+                                  {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }
+                                )}
                               </TableCell>
                               <TableCell>
                                 <span
@@ -1016,7 +599,8 @@ const Admin = () => {
                                       : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
                                   }`}
                                 >
-                                  {kyc.status.charAt(0).toUpperCase() + kyc.status.slice(1)}
+                                  {kyc.status.charAt(0).toUpperCase() +
+                                    kyc.status.slice(1)}
                                 </span>
                               </TableCell>
                               <TableCell>
@@ -1036,31 +620,50 @@ const Admin = () => {
                                   </DialogTrigger>
                                   <DialogContent className="max-w-[90vw] sm:max-w-4xl">
                                     <DialogHeader>
-                                      <DialogTitle>Review KYC Submission</DialogTitle>
+                                      <DialogTitle>
+                                        Review KYC Submission
+                                      </DialogTitle>
                                       <DialogDescription>
-                                        Review documents and update KYC status for {kyc.walletAddress.slice(0, 6)}...
+                                        Review documents and update KYC status
+                                        for {kyc.walletAddress.slice(0, 6)}...
                                       </DialogDescription>
                                     </DialogHeader>
                                     <div className="flex flex-col sm:flex-row gap-6 py-4">
                                       {/* Documents Section */}
                                       <div className="flex-1">
-                                        <h3 className="text-lg font-semibold mb-4">Documents</h3>
+                                        <h3 className="text-lg font-semibold mb-4">
+                                          Documents
+                                        </h3>
                                         {documentError ? (
-                                          <Alert variant="destructive" className="mb-4">
+                                          <Alert
+                                            variant="destructive"
+                                            className="mb-4"
+                                          >
                                             <AlertCircle className="h-4 w-4" />
                                             <AlertTitle>Error</AlertTitle>
-                                            <AlertDescription>{documentError}</AlertDescription>
+                                            <AlertDescription>
+                                              {documentError}
+                                            </AlertDescription>
                                           </Alert>
-                                        ) : Object.keys(documentPreviews).length ? (
+                                        ) : Object.keys(documentPreviews)
+                                            .length ? (
                                           <Carousel className="w-full">
                                             <CarouselContent>
-                                              {["idFront", "idBack", "profilePicture"].map(
+                                              {[
+                                                "idFront",
+                                                "idBack",
+                                                "profilePicture",
+                                              ].map(
                                                 (type) =>
                                                   documentPreviews[type] && (
                                                     <CarouselItem key={type}>
                                                       <div className="relative group">
                                                         <img
-                                                          src={documentPreviews[type]}
+                                                          src={
+                                                            documentPreviews[
+                                                              type
+                                                            ]
+                                                          }
                                                           alt={`${type} Document`}
                                                           className="w-full max-h-[400px] object-contain rounded-lg border dark:border-slate-700"
                                                         />
@@ -1069,7 +672,12 @@ const Admin = () => {
                                                           size="icon"
                                                           className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
                                                           onClick={() =>
-                                                            window.open(documentPreviews[type], "_blank")
+                                                            window.open(
+                                                              documentPreviews[
+                                                                type
+                                                              ],
+                                                              "_blank"
+                                                            )
                                                           }
                                                         >
                                                           <ZoomIn className="h-4 w-4" />
@@ -1100,20 +708,26 @@ const Admin = () => {
                                       {/* KYC Form and Details */}
                                       <div className="flex-1 space-y-6">
                                         <div>
-                                          <h3 className="text-lg font-semibold mb-2">Details</h3>
+                                          <h3 className="text-lg font-semibold mb-2">
+                                            Details
+                                          </h3>
                                           <div className="space-y-2">
                                             <div>
                                               <label className="text-sm text-muted-foreground">
                                                 Wallet Address
                                               </label>
-                                              <p className="font-mono text-sm break-all">{kyc.walletAddress}</p>
+                                              <p className="font-mono text-sm break-all">
+                                                {kyc.walletAddress}
+                                              </p>
                                             </div>
                                             <div>
                                               <label className="text-sm text-muted-foreground">
                                                 Submitted On
                                               </label>
                                               <p>
-                                                {new Date(kyc.createdAt).toLocaleDateString("en-US", {
+                                                {new Date(
+                                                  kyc.createdAt
+                                                ).toLocaleDateString("en-US", {
                                                   month: "long",
                                                   day: "numeric",
                                                   year: "numeric",
@@ -1131,35 +745,51 @@ const Admin = () => {
                                           </div>
                                         </div>
 
-                                        {kyc.history && kyc.history.length > 0 && (
-                                          <div>
-                                            <h3 className="text-lg font-semibold mb-2">Status History</h3>
-                                            <div className="space-y-2 max-h-[150px] overflow-y-auto">
-                                              {kyc.history.map((entry, index) => (
-                                                <div
-                                                  key={index}
-                                                  className="p-2 bg-slate-50 dark:bg-slate-800 rounded-md"
-                                                >
-                                                  <p className="text-sm">
-                                                    <span className="font-medium">
-                                                      {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
-                                                    </span>{" "}
-                                                    - {new Date(entry.updatedAt).toLocaleDateString()}
-                                                  </p>
-                                                  {entry.feedback && (
-                                                    <p className="text-sm text-muted-foreground">
-                                                      {entry.feedback}
-                                                    </p>
-                                                  )}
-                                                </div>
-                                              ))}
+                                        {kyc.history &&
+                                          kyc.history.length > 0 && (
+                                            <div>
+                                              <h3 className="text-lg font-semibold mb-2">
+                                                Status History
+                                              </h3>
+                                              <div className="space-y-2 max-h-[150px] overflow-y-auto">
+                                                {kyc.history.map(
+                                                  (entry, index) => (
+                                                    <div
+                                                      key={index}
+                                                      className="p-2 bg-slate-50 dark:bg-slate-800 rounded-md"
+                                                    >
+                                                      <p className="text-sm">
+                                                        <span className="font-medium">
+                                                          {entry.status
+                                                            .charAt(0)
+                                                            .toUpperCase() +
+                                                            entry.status.slice(
+                                                              1
+                                                            )}
+                                                        </span>{" "}
+                                                        -{" "}
+                                                        {new Date(
+                                                          entry.updatedAt
+                                                        ).toLocaleDateString()}
+                                                      </p>
+                                                      {entry.feedback && (
+                                                        <p className="text-sm text-muted-foreground">
+                                                          {entry.feedback}
+                                                        </p>
+                                                      )}
+                                                    </div>
+                                                  )
+                                                )}
+                                              </div>
                                             </div>
-                                          </div>
-                                        )}
+                                          )}
 
                                         <Form {...kycForm}>
                                           <form
-                                            onSubmit={kycForm.handleSubmit((values) => updateKyc.mutate(values))}
+                                            onSubmit={kycForm.handleSubmit(
+                                              (values) =>
+                                                updateKyc.mutate(values)
+                                            )}
                                             className="space-y-6"
                                           >
                                             <FormField
@@ -1169,7 +799,9 @@ const Admin = () => {
                                                 <FormItem>
                                                   <FormLabel>Status</FormLabel>
                                                   <Select
-                                                    onValueChange={field.onChange}
+                                                    onValueChange={
+                                                      field.onChange
+                                                    }
                                                     defaultValue={field.value}
                                                   >
                                                     <FormControl>
@@ -1178,8 +810,12 @@ const Admin = () => {
                                                       </SelectTrigger>
                                                     </FormControl>
                                                     <SelectContent>
-                                                      <SelectItem value="approved">Approved</SelectItem>
-                                                      <SelectItem value="rejected">Rejected</SelectItem>
+                                                      <SelectItem value="approved">
+                                                        Approved
+                                                      </SelectItem>
+                                                      <SelectItem value="rejected">
+                                                        Rejected
+                                                      </SelectItem>
                                                     </SelectContent>
                                                   </Select>
                                                   <FormMessage />
@@ -1191,12 +827,18 @@ const Admin = () => {
                                               name="feedback"
                                               render={({ field }) => (
                                                 <FormItem>
-                                                  <FormLabel>Feedback</FormLabel>
+                                                  <FormLabel>
+                                                    Feedback
+                                                  </FormLabel>
                                                   <FormControl>
-                                                    <Input placeholder="Reason for rejection" {...field} />
+                                                    <Input
+                                                      placeholder="Reason for rejection"
+                                                      {...field}
+                                                    />
                                                   </FormControl>
                                                   <FormDescription>
-                                                    Optional, recommended if rejecting.
+                                                    Optional, recommended if
+                                                    rejecting.
                                                   </FormDescription>
                                                   <FormMessage />
                                                 </FormItem>
@@ -1222,7 +864,9 @@ const Admin = () => {
                                               </Button>
                                               <Button
                                                 variant="outline"
-                                                onClick={() => setSelectedKyc(null)}
+                                                onClick={() =>
+                                                  setSelectedKyc(null)
+                                                }
                                                 className="w-full sm:w-auto"
                                               >
                                                 Cancel
@@ -1239,7 +883,10 @@ const Admin = () => {
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={4} className="text-center py-4 text-slate-500">
+                            <TableCell
+                              colSpan={4}
+                              className="text-center py-4 text-slate-500"
+                            >
                               No KYC submissions found.
                             </TableCell>
                           </TableRow>
@@ -1253,17 +900,26 @@ const Admin = () => {
                         <Card key={kyc._id}>
                           <CardContent className="p-4 flex flex-col gap-4">
                             <div>
-                              <p className="text-sm text-slate-500">Wallet Address</p>
-                              <p className="font-mono text-sm break-all">{kyc.walletAddress}</p>
+                              <p className="text-sm text-slate-500">
+                                Wallet Address
+                              </p>
+                              <p className="font-mono text-sm break-all">
+                                {kyc.walletAddress}
+                              </p>
                             </div>
                             <div>
-                              <p className="text-sm text-slate-500">Submission Date</p>
+                              <p className="text-sm text-slate-500">
+                                Submission Date
+                              </p>
                               <p>
-                                {new Date(kyc.createdAt).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })}
+                                {new Date(kyc.createdAt).toLocaleDateString(
+                                  "en-US",
+                                  {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }
+                                )}
                               </p>
                             </div>
                             <div>
@@ -1277,7 +933,8 @@ const Admin = () => {
                                     : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
                                 }`}
                               >
-                                {kyc.status.charAt(0).toUpperCase() + kyc.status.slice(1)}
+                                {kyc.status.charAt(0).toUpperCase() +
+                                  kyc.status.slice(1)}
                               </span>
                             </div>
                             <Dialog>
@@ -1296,31 +953,47 @@ const Admin = () => {
                               </DialogTrigger>
                               <DialogContent className="max-w-[90vw]">
                                 <DialogHeader>
-                                  <DialogTitle>Review KYC Submission</DialogTitle>
+                                  <DialogTitle>
+                                    Review KYC Submission
+                                  </DialogTitle>
                                   <DialogDescription>
-                                    Review documents and update KYC status for {kyc.walletAddress.slice(0, 6)}...
+                                    Review documents and update KYC status for{" "}
+                                    {kyc.walletAddress.slice(0, 6)}...
                                   </DialogDescription>
                                 </DialogHeader>
                                 <div className="space-y-6 py-4">
                                   {/* Documents Section */}
                                   <div>
-                                    <h3 className="text-lg font-semibold mb-4">Documents</h3>
+                                    <h3 className="text-lg font-semibold mb-4">
+                                      Documents
+                                    </h3>
                                     {documentError ? (
-                                      <Alert variant="destructive" className="mb-4">
+                                      <Alert
+                                        variant="destructive"
+                                        className="mb-4"
+                                      >
                                         <AlertCircle className="h-4 w-4" />
                                         <AlertTitle>Error</AlertTitle>
-                                        <AlertDescription>{documentError}</AlertDescription>
+                                        <AlertDescription>
+                                          {documentError}
+                                        </AlertDescription>
                                       </Alert>
                                     ) : Object.keys(documentPreviews).length ? (
                                       <Carousel className="w-full">
                                         <CarouselContent>
-                                          {["idFront", "idBack", "profilePicture"].map(
+                                          {[
+                                            "idFront",
+                                            "idBack",
+                                            "profilePicture",
+                                          ].map(
                                             (type) =>
                                               documentPreviews[type] && (
                                                 <CarouselItem key={type}>
                                                   <div className="relative group">
                                                     <img
-                                                      src={documentPreviews[type]}
+                                                      src={
+                                                        documentPreviews[type]
+                                                      }
                                                       alt={`${type} Document`}
                                                       className="w-full max-h-[300px] object-contain rounded-lg border dark:border-slate-700"
                                                     />
@@ -1329,7 +1002,12 @@ const Admin = () => {
                                                       size="icon"
                                                       className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
                                                       onClick={() =>
-                                                        window.open(documentPreviews[type], "_blank")
+                                                        window.open(
+                                                          documentPreviews[
+                                                            type
+                                                          ],
+                                                          "_blank"
+                                                        )
                                                       }
                                                     >
                                                       <ZoomIn className="h-4 w-4" />
@@ -1360,20 +1038,26 @@ const Admin = () => {
                                   {/* KYC Form and Details */}
                                   <div className="space-y-6">
                                     <div>
-                                      <h3 className="text-lg font-semibold mb-2">Details</h3>
+                                      <h3 className="text-lg font-semibold mb-2">
+                                        Details
+                                      </h3>
                                       <div className="space-y-2">
                                         <div>
                                           <label className="text-sm text-muted-foreground">
                                             Wallet Address
                                           </label>
-                                          <p className="font-mono text-sm break-all">{kyc.walletAddress}</p>
+                                          <p className="font-mono text-sm break-all">
+                                            {kyc.walletAddress}
+                                          </p>
                                         </div>
                                         <div>
                                           <label className="text-sm text-muted-foreground">
                                             Submitted On
                                           </label>
                                           <p>
-                                            {new Date(kyc.createdAt).toLocaleDateString("en-US", {
+                                            {new Date(
+                                              kyc.createdAt
+                                            ).toLocaleDateString("en-US", {
                                               month: "long",
                                               day: "numeric",
                                               year: "numeric",
@@ -1393,7 +1077,9 @@ const Admin = () => {
 
                                     {kyc.history && kyc.history.length > 0 && (
                                       <div>
-                                        <h3 className="text-lg font-semibold mb-2">Status History</h3>
+                                        <h3 className="text-lg font-semibold mb-2">
+                                          Status History
+                                        </h3>
                                         <div className="space-y-2 max-h-[150px] overflow-y-auto">
                                           {kyc.history.map((entry, index) => (
                                             <div
@@ -1402,9 +1088,15 @@ const Admin = () => {
                                             >
                                               <p className="text-sm">
                                                 <span className="font-medium">
-                                                  {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
+                                                  {entry.status
+                                                    .charAt(0)
+                                                    .toUpperCase() +
+                                                    entry.status.slice(1)}
                                                 </span>{" "}
-                                                - {new Date(entry.updatedAt).toLocaleDateString()}
+                                                -{" "}
+                                                {new Date(
+                                                  entry.updatedAt
+                                                ).toLocaleDateString()}
                                               </p>
                                               {entry.feedback && (
                                                 <p className="text-sm text-muted-foreground">
@@ -1419,7 +1111,9 @@ const Admin = () => {
 
                                     <Form {...kycForm}>
                                       <form
-                                        onSubmit={kycForm.handleSubmit((values) => updateKyc.mutate(values))}
+                                        onSubmit={kycForm.handleSubmit(
+                                          (values) => updateKyc.mutate(values)
+                                        )}
                                         className="space-y-6"
                                       >
                                         <FormField
@@ -1438,8 +1132,12 @@ const Admin = () => {
                                                   </SelectTrigger>
                                                 </FormControl>
                                                 <SelectContent>
-                                                  <SelectItem value="approved">Approved</SelectItem>
-                                                  <SelectItem value="rejected">Rejected</SelectItem>
+                                                  <SelectItem value="approved">
+                                                    Approved
+                                                  </SelectItem>
+                                                  <SelectItem value="rejected">
+                                                    Rejected
+                                                  </SelectItem>
                                                 </SelectContent>
                                               </Select>
                                               <FormMessage />
@@ -1453,10 +1151,14 @@ const Admin = () => {
                                             <FormItem>
                                               <FormLabel>Feedback</FormLabel>
                                               <FormControl>
-                                                <Input placeholder="Reason for rejection" {...field} />
+                                                <Input
+                                                  placeholder="Reason for rejection"
+                                                  {...field}
+                                                />
                                               </FormControl>
                                               <FormDescription>
-                                                Optional, recommended if rejecting.
+                                                Optional, recommended if
+                                                rejecting.
                                               </FormDescription>
                                               <FormMessage />
                                             </FormItem>
@@ -1498,7 +1200,9 @@ const Admin = () => {
                         </Card>
                       ))
                     ) : (
-                      <p className="text-center py-4 text-slate-500">No KYC submissions found.</p>
+                      <p className="text-center py-4 text-slate-500">
+                        No KYC submissions found.
+                      </p>
                     )}
                   </div>
                 </CardContent>
@@ -1519,11 +1223,15 @@ const Admin = () => {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Create Election</DialogTitle>
-                      <DialogDescription>Enter election details.</DialogDescription>
+                      <DialogDescription>
+                        Enter election details.
+                      </DialogDescription>
                     </DialogHeader>
                     <Form {...electionForm}>
                       <form
-                        onSubmit={electionForm.handleSubmit((values) => addElection.mutate(values))}
+                        onSubmit={electionForm.handleSubmit((values) =>
+                          addElection.mutate(values)
+                        )}
                         className="space-y-6"
                       >
                         <FormField
@@ -1546,7 +1254,10 @@ const Admin = () => {
                             <FormItem>
                               <FormLabel>Description</FormLabel>
                               <FormControl>
-                                <Input placeholder="General election" {...field} />
+                                <Input
+                                  placeholder="General election"
+                                  {...field}
+                                />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -1588,7 +1299,8 @@ const Admin = () => {
                                 <Select
                                   onValueChange={(value) => {
                                     const current = field.value || [];
-                                    if (!current.includes(value)) field.onChange([...current, value]);
+                                    if (!current.includes(value))
+                                      field.onChange([...current, value]);
                                   }}
                                 >
                                   <SelectTrigger>
@@ -1596,11 +1308,17 @@ const Admin = () => {
                                   </SelectTrigger>
                                   <SelectContent>
                                     {candidates.map((candidate) => (
-                                      <SelectItem key={candidate._id} value={candidate._id}>
+                                      <SelectItem
+                                        key={candidate._id}
+                                        value={candidate._id}
+                                      >
                                         {candidate.name} (
                                         {typeof candidate.position === "object"
                                           ? candidate.position.name
-                                          : positions.find((p) => p._id === candidate.position)?.name}
+                                          : positions.find(
+                                              (p) =>
+                                                p._id === candidate.position
+                                            )?.name}
                                         )
                                       </SelectItem>
                                     ))}
@@ -1609,7 +1327,9 @@ const Admin = () => {
                               </FormControl>
                               <div className="mt-2">
                                 {field.value?.map((id: string) => {
-                                  const candidate = candidates.find((c) => c._id === id);
+                                  const candidate = candidates.find(
+                                    (c) => c._id === id
+                                  );
                                   return candidate ? (
                                     <div
                                       key={id}
@@ -1620,7 +1340,11 @@ const Admin = () => {
                                         variant="ghost"
                                         size="sm"
                                         onClick={() =>
-                                          field.onChange(field.value.filter((v: string) => v !== id))
+                                          field.onChange(
+                                            field.value.filter(
+                                              (v: string) => v !== id
+                                            )
+                                          )
                                         }
                                       >
                                         <Trash2 className="h-4 w-4" />
@@ -1639,7 +1363,9 @@ const Admin = () => {
                             disabled={isAddingElection || !candidates.length}
                             className="w-full sm:w-auto"
                           >
-                            {isAddingElection ? "Creating..." : "Create Election"}
+                            {isAddingElection
+                              ? "Creating..."
+                              : "Create Election"}
                           </Button>
                         </DialogFooter>
                       </form>
@@ -1666,7 +1392,9 @@ const Admin = () => {
                         {elections.length ? (
                           elections.map((election) => (
                             <TableRow key={election._id}>
-                              <TableCell className="font-medium">{election.title}</TableCell>
+                              <TableCell className="font-medium">
+                                {election.title}
+                              </TableCell>
                               <TableCell>
                                 <span
                                   className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -1677,30 +1405,41 @@ const Admin = () => {
                                       : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
                                   }`}
                                 >
-                                  {election.status.charAt(0).toUpperCase() + election.status.slice(1)}
+                                  {election.status.charAt(0).toUpperCase() +
+                                    election.status.slice(1)}
                                 </span>
                               </TableCell>
                               <TableCell>
-                                {new Date(election.startDate).toLocaleDateString("en-US", {
+                                {new Date(
+                                  election.startDate
+                                ).toLocaleDateString("en-US", {
                                   month: "short",
                                   day: "numeric",
                                   year: "numeric",
                                 })}
                               </TableCell>
                               <TableCell>
-                                {new Date(election.endDate).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })}
+                                {new Date(election.endDate).toLocaleDateString(
+                                  "en-US",
+                                  {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }
+                                )}
                               </TableCell>
-                              <TableCell>{election.participantsCount}</TableCell>
+                              <TableCell>
+                                {election.participantsCount}
+                              </TableCell>
                               <TableCell>{election.votersCount}</TableCell>
                             </TableRow>
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={6} className="text-center py-4 text-slate-500">
+                            <TableCell
+                              colSpan={6}
+                              className="text-center py-4 text-slate-500"
+                            >
                               No elections found.
                             </TableCell>
                           </TableRow>
@@ -1728,13 +1467,18 @@ const Admin = () => {
                                     : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
                                 }`}
                               >
-                                {election.status.charAt(0).toUpperCase() + election.status.slice(1)}
+                                {election.status.charAt(0).toUpperCase() +
+                                  election.status.slice(1)}
                               </span>
                             </div>
                             <div>
-                              <p className="text-sm text-slate-500">Start Date</p>
+                              <p className="text-sm text-slate-500">
+                                Start Date
+                              </p>
                               <p>
-                                {new Date(election.startDate).toLocaleDateString("en-US", {
+                                {new Date(
+                                  election.startDate
+                                ).toLocaleDateString("en-US", {
                                   month: "short",
                                   day: "numeric",
                                   year: "numeric",
@@ -1744,15 +1488,20 @@ const Admin = () => {
                             <div>
                               <p className="text-sm text-slate-500">End Date</p>
                               <p>
-                                {new Date(election.endDate).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })}
+                                {new Date(election.endDate).toLocaleDateString(
+                                  "en-US",
+                                  {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }
+                                )}
                               </p>
                             </div>
                             <div>
-                              <p className="text-sm text-slate-500">Candidates</p>
+                              <p className="text-sm text-slate-500">
+                                Candidates
+                              </p>
                               <p>{election.participantsCount}</p>
                             </div>
                             <div>
@@ -1763,7 +1512,9 @@ const Admin = () => {
                         </Card>
                       ))
                     ) : (
-                      <p className="text-center py-4 text-slate-500">No elections found.</p>
+                      <p className="text-center py-4 text-slate-500">
+                        No elections found.
+                      </p>
                     )}
                   </div>
                 </CardContent>
