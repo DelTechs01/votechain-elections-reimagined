@@ -1,7 +1,8 @@
+import { API_URL } from "./config";
 import { useState } from "react";
 import { Candidate, Position } from "./adminTypes";
 import { candidateSchema } from "./adminSchema";
-import { z } from "node_modules/zod/lib/external";
+import { z } from "zod";
 import { useAccount } from "wagmi";
 import { useForm } from "react-hook-form";
 import { TabsContent } from "../ui/tabs";
@@ -53,7 +54,6 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import {
   Tooltip,
   TooltipContent,
@@ -65,18 +65,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "../ui/carousel";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 
-//
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
 const CandidatesPanel = () => {
   const queryClient = useQueryClient();
   const { address: account } = useAccount();
@@ -99,7 +91,7 @@ const CandidatesPanel = () => {
   //fetch data with react query
   const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
     queryKey: ["positions"],
-    queryFn: () => axios.get(`${API_URL}/position`).then((res) => res.data),
+    queryFn: () => axios.get(`${API_URL}/positions`).then((res) => res.data),
     enabled: !!account,
   });
 
@@ -118,8 +110,12 @@ const CandidatesPanel = () => {
       toast.success("Candidate added successfully");
       candidateForm.reset();
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || "Failed to add candidate");
+    onError: (error: unknown) => {
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || "Failed to add candidate");
+      } else {
+        toast.error("Failed to add candidate");
+      }
     },
     onSettled: () => setIsAddingCandidate(false),
   });
@@ -133,8 +129,12 @@ const CandidatesPanel = () => {
       candidateForm.reset();
       setSelectedCandidate(null);
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || "Failed to update candidate");
+    onError: (error: unknown) => {
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || "Failed to update candidate");
+      } else {
+        toast.error("Failed to update candidate");
+      }
     },
     onSettled: () => setIsEditingCandidate(false),
   });
@@ -146,8 +146,12 @@ const CandidatesPanel = () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate deleted successfully");
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || "Failed to delete candidate");
+    onError: (error: unknown) => {
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || "Failed to delete candidate");
+      } else {
+        toast.error("Failed to delete candidate");
+      }
     },
     onSettled: () => setIsDeletingCandidate(false),
   });

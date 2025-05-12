@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Calendar, Users, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { API_URL } from "@/components/admin/config";
 import {
   Card,
   CardContent,
@@ -17,7 +18,6 @@ import { useWeb3 } from "@/context/Web3Context";
 import axios from "axios";
 import { toast } from "sonner";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface Election {
   _id: string;
@@ -270,7 +270,7 @@ const Elections = () => {
       <div className="flex justify-center mb-8">
         <div className="inline-flex border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
           {["all", "active", "upcoming", "ended"].map((status) => (
-            <button
+            <Button
               key={status}
               onClick={() => setFilter(status as "all" | "active" | "upcoming" | "ended")}
               className={`px-4 py-2 text-sm font-medium ${
@@ -281,7 +281,7 @@ const Elections = () => {
               aria-pressed={filter === status}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
