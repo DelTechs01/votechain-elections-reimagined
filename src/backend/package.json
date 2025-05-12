@@ -20,6 +20,7 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "hardhat": "^2.24.0",
     "nodemon": "^3.1.10"
   }
 }
