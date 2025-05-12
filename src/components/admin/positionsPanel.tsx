@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { useAccount } from "wagmi";
 
 
 import {
@@ -54,9 +55,9 @@ import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { TabsContent } from "../ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
 const PositionsPanel = () => {
   const queryClient = useQueryClient();
+  const { address: account } = useAccount();
   const [isAddingPosition, setIsAddingPosition] = useState(false);
   const [isAddingElection, setIsAddingElection] = useState(false);
 
