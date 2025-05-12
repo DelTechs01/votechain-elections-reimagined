@@ -43,7 +43,7 @@ app.use(
     origin:
       process.env.ENABLE_CORS === "true"
         ? "*"
-        : process.env.FRONTEND_URL || "http://localhost:3000",
+        : process.env.FRONTEND_URL || "http://localhost:8080",
     credentials: true,
   })
 );
