@@ -64,10 +64,36 @@ import { toast } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
-
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 
+// Custom fetch function with exponential backoff for 429 errors
+const fetchWithBackoff = async (url, retries = 3, delay = 1000) => {
+  try {
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 429 && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return fetchWithBackoff(url, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
+
+// Custom mutation function with backoff
+const mutateWithBackoff = async (url, method, data, retries = 3, delay = 1000) => {
+  try {
+    const response = await axios({ url, method, data });
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 429 && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return mutateWithBackoff(url, method, data, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
 
 const CandidatesPanel = () => {
   const queryClient = useQueryClient();
@@ -75,9 +101,8 @@ const CandidatesPanel = () => {
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
   const [isEditingCandidate, setIsEditingCandidate] = useState(false);
   const [isDeletingCandidate, setIsDeletingCandidate] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
-    null
-  );
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+
   const candidateForm = useForm<z.infer<typeof candidateSchema>>({
     resolver: zodResolver(candidateSchema),
     defaultValues: {
@@ -88,29 +113,37 @@ const CandidatesPanel = () => {
     },
   });
 
-  //fetch data with react query
+  // Fetch data with React Query
   const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
     queryKey: ["positions"],
-    queryFn: () => axios.get(`${API_URL}/positions`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/positions`),
     enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    onError: () => toast.error("Failed to fetch positions. Please try again later."),
   });
 
   const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
     queryKey: ["candidates"],
-    queryFn: () => axios.get(`${API_URL}/candidates`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/candidates`),
     enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
+    onError: () => toast.error("Failed to fetch candidates. Please try again later."),
   });
 
-  //mutation for adding candidate
+  // Mutation for adding candidate
   const addCandidate = useMutation({
     mutationFn: (values: z.infer<typeof candidateSchema>) =>
-      axios.post(`${API_URL}/candidates`, values),
+      mutateWithBackoff(`${API_URL}/candidates`, "post", values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate added successfully");
       candidateForm.reset();
     },
-    onError: (error: unknown) => {
+    onError: (error) => {
       if (axios.isAxiosError(error)) {
         toast.error(error.response?.data?.error || "Failed to add candidate");
       } else {
@@ -120,16 +153,17 @@ const CandidatesPanel = () => {
     onSettled: () => setIsAddingCandidate(false),
   });
 
+  // Mutation for updating candidate
   const updateCandidate = useMutation({
     mutationFn: (values: z.infer<typeof candidateSchema>) =>
-      axios.put(`${API_URL}/candidates/${selectedCandidate?._id}`, values),
+      mutateWithBackoff(`${API_URL}/candidates/${selectedCandidate?._id}`, "put", values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate updated successfully");
       candidateForm.reset();
       setSelectedCandidate(null);
     },
-    onError: (error: unknown) => {
+    onError: (error) => {
       if (axios.isAxiosError(error)) {
         toast.error(error.response?.data?.error || "Failed to update candidate");
       } else {
@@ -139,14 +173,15 @@ const CandidatesPanel = () => {
     onSettled: () => setIsEditingCandidate(false),
   });
 
+  // Mutation for deleting candidate
   const deleteCandidate = useMutation({
     mutationFn: (candidateId: string) =>
-      axios.delete(`${API_URL}/candidates/${candidateId}`),
+      mutateWithBackoff(`${API_URL}/candidates/${candidateId}`, "delete", null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate deleted successfully");
     },
-    onError: (error: unknown) => {
+    onError: (error) => {
       if (axios.isAxiosError(error)) {
         toast.error(error.response?.data?.error || "Failed to delete candidate");
       } else {
@@ -155,11 +190,28 @@ const CandidatesPanel = () => {
     },
     onSettled: () => setIsDeletingCandidate(false),
   });
+
+  // Aggregate loading state
+  const isLoading = isLoadingPositions || isLoadingCandidates;
+
+  if (isLoading) {
+    return (
+      <TabsContent value="candidates">
+        <div className="flex justify-center py-12">
+          <div className="animate-pulse flex flex-col items-center">
+            <div className="h-8 w-64 bg-slate-200 dark:bg-slate-700 rounded mb-4"></div>
+            <div className="h-4 w-96 bg-slate-200 dark:bg-slate-700 rounded"></div>
+          </div>
+        </div>
+      </TabsContent>
+    );
+  }
+
   return (
     <TabsContent value="candidates">
       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
         <h2 className="text-2xl font-semibold">Candidates</h2>
-        <Dialog>
+        <Dialog open={isAddingCandidate} onOpenChange={setIsAddingCandidate}>
           <DialogTrigger asChild>
             <Button className="flex items-center gap-2">
               <Plus className="h-4 w-4" />
@@ -173,9 +225,10 @@ const CandidatesPanel = () => {
             </DialogHeader>
             <Form {...candidateForm}>
               <form
-                onSubmit={candidateForm.handleSubmit((values) =>
-                  addCandidate.mutate(values)
-                )}
+                onSubmit={candidateForm.handleSubmit((values) => {
+                  setIsAddingCandidate(true);
+                  addCandidate.mutate(values);
+                })}
                 className="space-y-6"
               >
                 <FormField
@@ -312,7 +365,13 @@ const CandidatesPanel = () => {
                       <TableCell>{candidate.voteCount}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          <Dialog>
+                          <Dialog
+                            open={isEditingCandidate && selectedCandidate?._id === candidate._id}
+                            onOpenChange={(open) => {
+                              setIsEditingCandidate(open);
+                              if (!open) setSelectedCandidate(null);
+                            }}
+                          >
                             <DialogTrigger asChild>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -321,6 +380,7 @@ const CandidatesPanel = () => {
                                     size="sm"
                                     onClick={() => {
                                       setSelectedCandidate(candidate);
+                                      setIsEditingCandidate(true);
                                       candidateForm.reset({
                                         name: candidate.name,
                                         party: candidate.party,
@@ -347,9 +407,10 @@ const CandidatesPanel = () => {
                               </DialogHeader>
                               <Form {...candidateForm}>
                                 <form
-                                  onSubmit={candidateForm.handleSubmit(
-                                    (values) => updateCandidate.mutate(values)
-                                  )}
+                                  onSubmit={candidateForm.handleSubmit((values) => {
+                                    setIsEditingCandidate(true);
+                                    updateCandidate.mutate(values);
+                                  })}
                                   className="space-y-6"
                                 >
                                   <FormField
@@ -433,25 +494,34 @@ const CandidatesPanel = () => {
                                   <DialogFooter>
                                     <Button
                                       type="submit"
-                                      disabled={
-                                        isEditingCandidate || !positions.length
-                                      }
+                                      disabled={isEditingCandidate || !positions.length}
                                       className="w-full sm:w-auto"
                                     >
-                                      {isEditingCandidate
-                                        ? "Updating..."
-                                        : "Update Candidate"}
+                                      {isEditingCandidate ? "Updating..." : "Update Candidate"}
                                     </Button>
                                   </DialogFooter>
                                 </form>
                               </Form>
                             </DialogContent>
                           </Dialog>
-                          <Dialog>
+                          <Dialog
+                            open={isDeletingCandidate && selectedCandidate?._id === candidate._id}
+                            onOpenChange={(open) => {
+                              setIsDeletingCandidate(open);
+                              if (!open) setSelectedCandidate(null);
+                            }}
+                          >
                             <DialogTrigger asChild>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <Button variant="outline" size="sm">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedCandidate(candidate);
+                                      setIsDeletingCandidate(true);
+                                    }}
+                                  >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </TooltipTrigger>
@@ -462,26 +532,22 @@ const CandidatesPanel = () => {
                               <DialogHeader>
                                 <DialogTitle>Delete Candidate</DialogTitle>
                                 <DialogDescription>
-                                  Are you sure you want to delete{" "}
-                                  {candidate.name}?
+                                  Are you sure you want to delete {candidate.name}?
                                 </DialogDescription>
                               </DialogHeader>
                               <DialogFooter>
                                 <Button
                                   variant="destructive"
-                                  onClick={() =>
-                                    deleteCandidate.mutate(candidate._id)
-                                  }
+                                  onClick={() => deleteCandidate.mutate(candidate._id)}
                                   disabled={isDeletingCandidate}
                                   className="w-full sm:w-auto"
                                 >
-                                  {isDeletingCandidate
-                                    ? "Deleting..."
-                                    : "Delete"}
+                                  {isDeletingCandidate ? "Deleting..." : "Delete"}
                                 </Button>
                                 <Button
                                   variant="outline"
                                   className="w-full sm:w-auto"
+                                  onClick={() => setIsDeletingCandidate(false)}
                                 >
                                   Cancel
                                 </Button>
@@ -518,9 +584,7 @@ const CandidatesPanel = () => {
                       />
                       <div>
                         <p className="font-medium">{candidate.name}</p>
-                        <p className="text-sm text-slate-500">
-                          {candidate.party}
-                        </p>
+                        <p className="text-sm text-slate-500">{candidate.party}</p>
                       </div>
                     </div>
                     <div>
@@ -536,13 +600,20 @@ const CandidatesPanel = () => {
                       <p>{candidate.voteCount}</p>
                     </div>
                     <div className="flex gap-2">
-                      <Dialog>
+                      <Dialog
+                        open={isEditingCandidate && selectedCandidate?._id === candidate._id}
+                        onOpenChange={(open) => {
+                          setIsEditingCandidate(open);
+                          if (!open) setSelectedCandidate(null);
+                        }}
+                      >
                         <DialogTrigger asChild>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
                               setSelectedCandidate(candidate);
+                              setIsEditingCandidate(true);
                               candidateForm.reset({
                                 name: candidate.name,
                                 party: candidate.party,
@@ -566,9 +637,10 @@ const CandidatesPanel = () => {
                           </DialogHeader>
                           <Form {...candidateForm}>
                             <form
-                              onSubmit={candidateForm.handleSubmit((values) =>
-                                updateCandidate.mutate(values)
-                              )}
+                              onSubmit={candidateForm.handleSubmit((values) => {
+                                setIsEditingCandidate(true);
+                                updateCandidate.mutate(values);
+                              })}
                               className="space-y-6"
                             >
                               <FormField
@@ -578,10 +650,7 @@ const CandidatesPanel = () => {
                                   <FormItem>
                                     <FormLabel>Name</FormLabel>
                                     <FormControl>
-                                      <Input
-                                        placeholder="Jane Doe"
-                                        {...field}
-                                      />
+                                      <Input placeholder="Jane Doe" {...field} />
                                     </FormControl>
                                     <FormMessage />
                                   </FormItem>
@@ -652,23 +721,32 @@ const CandidatesPanel = () => {
                               <DialogFooter>
                                 <Button
                                   type="submit"
-                                  disabled={
-                                    isEditingCandidate || !positions.length
-                                  }
+                                  disabled={isEditingCandidate || !positions.length}
                                   className="w-full"
                                 >
-                                  {isEditingCandidate
-                                    ? "Updating..."
-                                    : "Update Candidate"}
+                                  {isEditingCandidate ? "Updating..." : "Update Candidate"}
                                 </Button>
                               </DialogFooter>
                             </form>
                           </Form>
                         </DialogContent>
                       </Dialog>
-                      <Dialog>
+                      <Dialog
+                        open={isDeletingCandidate && selectedCandidate?._id === candidate._id}
+                        onOpenChange={(open) => {
+                          setIsDeletingCandidate(open);
+                          if (!open) setSelectedCandidate(null);
+                        }}
+                      >
                         <DialogTrigger asChild>
-                          <Button variant="outline" size="sm">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedCandidate(candidate);
+                              setIsDeletingCandidate(true);
+                            }}
+                          >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </DialogTrigger>
@@ -682,15 +760,17 @@ const CandidatesPanel = () => {
                           <DialogFooter>
                             <Button
                               variant="destructive"
-                              onClick={() =>
-                                deleteCandidate.mutate(candidate._id)
-                              }
+                              onClick={() => deleteCandidate.mutate(candidate._id)}
                               disabled={isDeletingCandidate}
                               className="w-full"
                             >
                               {isDeletingCandidate ? "Deleting..." : "Delete"}
                             </Button>
-                            <Button variant="outline" className="w-full">
+                            <Button
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => setIsDeletingCandidate(false)}
+                            >
                               Cancel
                             </Button>
                           </DialogFooter>
@@ -701,9 +781,7 @@ const CandidatesPanel = () => {
                 </Card>
               ))
             ) : (
-              <p className="text-center py-4 text-slate-500">
-                No candidates found.
-              </p>
+              <p className="text-center py-4 text-slate-500">No candidates found.</p>
             )}
           </div>
         </CardContent>

@@ -21,32 +21,60 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { API_URL } from "../components/admin/config";
 
+// Ensure all API calls use fetchWithBackoff for consistent retry logic
+const fetchWithBackoff = async (url, retries = 3, delay = 1000) => {
+  try {
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 429 && retries > 0) {
+      // Wait for the specified delay before retrying
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      // Retry with reduced retries and increased delay (exponential backoff)
+      return fetchWithBackoff(url, retries - 1, delay * 2);
+    }
+    throw error; // Rethrow other errors or if retries are exhausted
+  }
+};
+
 const Admin = () => {
   const { account, isAdmin } = useWeb3();
 
-  //Fetch data with React Query
+  // Fetch data with React Query, with retry delay and backoff
   const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
     queryKey: ["positions"],
-    queryFn: () => axios.get(`${API_URL}/positions`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/positions`),
     enabled: !!account,
+    retry: 2, // Limit retries to 2
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000, // Exponential backoff: 1s, 2s, 4s
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
   const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
     queryKey: ["candidates"],
-    queryFn: () => axios.get(`${API_URL}/candidates`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/candidates`),
     enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: kycSubmissions = [], isLoading: isLoadingKyc } = useQuery({
     queryKey: ["kycSubmissions"],
-    queryFn: () => axios.get(`${API_URL}/kyc/all`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/kyc/all`),
     enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: elections = [], isLoading: isLoadingElections } = useQuery({
     queryKey: ["elections"],
-    queryFn: () => axios.get(`${API_URL}/elections`).then((res) => res.data),
+    queryFn: () => fetchWithBackoff(`${API_URL}/elections`),
     enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
   });
 
   useEffect(() => {
@@ -56,12 +84,14 @@ const Admin = () => {
     }
   }, [account]);
 
-  if (
+  // Aggregate loading state
+  const isLoading =
     isLoadingPositions ||
     isLoadingCandidates ||
     isLoadingKyc ||
-    isLoadingElections
-  ) {
+    isLoadingElections;
+
+  if (isLoading) {
     return (
       <div className="container mx-auto px-4 py-12 flex justify-center">
         <div className="animate-pulse flex flex-col items-center">
@@ -119,24 +149,20 @@ const Admin = () => {
               ))}
             </TabsList>
 
-            {/* Candidates Management */}
             <TabsContent value="candidates">
-              <CandidatesPanel />
+              <CandidatesPanel candidates={candidates} />
             </TabsContent>
 
-            {/* Positions Management */}
             <TabsContent value="positions">
-              <PositionsPanel />
+              <PositionsPanel positions={positions} />
             </TabsContent>
 
-            {/* KYC Management */}
             <TabsContent value="kyc">
-              <KycPanel />
+              <KycPanel kycSubmissions={kycSubmissions} />
             </TabsContent>
 
-            {/* Elections Management */}
             <TabsContent value="elections">
-              <ElectionsPanel />
+              <ElectionsPanel elections={elections} />
             </TabsContent>
           </Tabs>
         </motion.div>

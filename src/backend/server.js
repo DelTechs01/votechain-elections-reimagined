@@ -305,7 +305,7 @@ app.put(
   [
     param("id").isMongoId().withMessage("Invalid KYC ID"),
     body("status")
-      .isIn(["pending", "approved", "rejected"])
+      .isIn(["received", "Approved", "rejected"])
       .withMessage("Invalid status"),
     body("feedback").optional().isString().withMessage("Feedback must be a string"),
   ],
