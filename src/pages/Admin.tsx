@@ -1,6 +1,6 @@
 import CandidatesPanel from "../components/admin/CandidatesPanel";
-import PositionsPanel from "../components/admin/PositionsPanel";
-import KycPanel from "../components/admin/KycPanel";
+import PositionsPanel from "../components/admin/positionsPanel";
+import KycPanel from "../components/admin/KYCPanel";
 import ElectionsPanel from "../components/admin/ElectionsPanel";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
