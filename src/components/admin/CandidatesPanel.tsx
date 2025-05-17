@@ -4,7 +4,7 @@ import { candidateSchema } from "../admin/adminSchema";
 import { z } from "zod";
 import { useAccount } from "wagmi";
 import { useForm } from "react-hook-form";
-//import { TabsContent } from "../../ui/tabs";
+import { TabsContent } from "../ui/tabs";
 import {
   Plus,
   Pencil,
@@ -62,7 +62,7 @@ interface CandidatesPanelProps {
   isLoading: boolean;
 }
 
-const CandidatesPanel = ({ candidates, positions, isLoading }: CandidatesPanelProps) => {
+const CandidatesPanel = ({ candidates, positions = [], isLoading }: CandidatesPanelProps) => {
   const { address: account } = useAccount();
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
   const [isEditingCandidate, setIsEditingCandidate] = useState(false);

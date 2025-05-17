@@ -4,13 +4,12 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { createMetaTransaction, executeMetaTransaction } from '@/utils/metaTransactions';
 
-// Enhanced ABI for the voting contract
 const VotingContractABI = [
   "function registerVoter(address _voterAddress) public",
-  "function addCandidate(string memory _name, string memory _party, string memory _imageUrl) public",
-  "function castVote(uint256 _candidateId) public",
+  "function addCandidate(string memory _name, string memory _party, string memory _imageUrl, string memory _position) public returns(uint256)",
+  "function castVote(uint256 _candidateId, string memory _position) public",
   "function getCandidateCount() public view returns(uint256)",
-  "function getCandidate(uint256 _candidateId) public view returns(uint256, string memory, string memory, string memory, uint256)",
+  "function getCandidate(uint256 _candidateId) public view returns(uint256, string memory, string memory, string memory, uint256, string memory, bool)",
   "function getVoterStatus(address _voterAddress) public view returns(bool, bool)",
   "function isAdmin(address _address) public view returns(bool)",
   "function getNonce(address user) public view returns(uint256)",
@@ -31,7 +30,7 @@ interface ElectionSettings {
 }
 
 interface Candidate {
-  id: number;
+  id: string;
   name: string;
   party: string;
   imageUrl: string;
@@ -46,7 +45,7 @@ interface VoterStatus {
 }
 
 interface KycStatus {
-  status: 'not submitted' | 'pending' | 'approved' | 'rejected';
+  status: 'NotSubmitted' | 'Pending' | 'Approved' | 'Rejected' | 'Received';
   feedback?: string;
   submittedAt?: Date;
 }
@@ -65,10 +64,10 @@ interface Web3ContextProps {
   fetchCandidates: () => Promise<void>;
   fetchKycStatus: () => Promise<void>;
   addCandidate: (name: string, party: string, position: string, imageUrl?: string) => Promise<void>;
-  castVote: (candidateId: number, position: string) => Promise<void>;
+  castVote: (candidateId: string, position: string, electionId: string) => Promise<void>;
   registerVoter: (address: string) => Promise<void>;
   fetchVoterStatus: () => Promise<void>;
-  disqualifyCandidate: (candidateId: number) => Promise<void>;
+  disqualifyCandidate: (candidateId: string) => Promise<void>;
   setElectionPeriod: (startTime: number, endTime: number) => Promise<void>;
   setResultsPublished: (published: boolean) => Promise<void>;
   setRealTimeResults: (enabled: boolean) => Promise<void>;
@@ -84,12 +83,8 @@ interface Web3ProviderProps {
   children: ReactNode;
 }
 
-// Use import.meta.env instead of process.env for Vite
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
-
-// Backend API URL - update with import.meta.env
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-// Relayer URL
 const RELAYER_URL = `${API_URL}/relay/vote`;
 
 export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
@@ -99,63 +94,62 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [voterStatus, setVoterStatus] = useState<VoterStatus>({ isRegistered: false, hasVoted: false });
-  const [kycStatus, setKycStatus] = useState<KycStatus>({ status: 'not submitted' });
+  const [kycStatus, setKycStatus] = useState<KycStatus>({ status: 'NotSubmitted' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
   const [canViewResults, setCanViewResults] = useState(false);
 
-  // Initialize provider when window loads
   useEffect(() => {
     const init = async () => {
-      // Check if MetaMask is installed
-      if (typeof window.ethereum !== 'undefined') {
-        // Create provider
-        const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-        setProvider(web3Provider);
-        
-        // Listen for account changes
-        window.ethereum.on('accountsChanged', (accounts: string[]) => {
-          if (accounts.length > 0) {
-            setAccount(accounts[0]);
-            fetchVoterStatus();
-            fetchKycStatus();
-            checkIfAdmin(accounts[0]);
-          } else {
-            setAccount(null);
-            setIsAdmin(false);
-            setKycStatus({ status: 'not submitted' });
-          }
-        });
-        
-        // Check if already connected
-        try {
-          const accounts = await web3Provider.listAccounts();
-          if (accounts.length > 0) {
-            setAccount(accounts[0]);
-            setIsConnected(true);
-            // Create contract instance
-            const signer = web3Provider.getSigner();
-            const votingContract = new ethers.Contract(CONTRACT_ADDRESS, VotingContractABI, signer);
-            setContract(votingContract);
-            
-            await fetchVoterStatus();
-            await fetchKycStatus();
-            await checkIfAdmin(accounts[0]);
-            await fetchCandidates();
-          }
-        } catch (error) {
-          console.error("Failed to check existing connection:", error);
+      if (typeof window.ethereum === 'undefined') {
+        toast.error("MetaMask is not installed.");
+        return;
+      }
+
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      setProvider(web3Provider);
+
+      window.ethereum.on('accountsChanged', (accounts: string[]) => {
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          setIsConnected(true);
+          fetchVoterStatus();
+          fetchKycStatus();
+          checkIfAdmin(accounts[0]);
+        } else {
+          setAccount(null);
+          setIsAdmin(false);
+          setIsConnected(false);
+          setKycStatus({ status: 'NotSubmitted' });
         }
-      } else {
-        toast.error("MetaMask is not installed. Please install MetaMask to use this application.");
+      });
+
+      try {
+        const accounts = await web3Provider.listAccounts();
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          setIsConnected(true);
+          const signer = web3Provider.getSigner();
+          const votingContract = new ethers.Contract(CONTRACT_ADDRESS, VotingContractABI, signer);
+          setContract(votingContract);
+          await Promise.all([
+            fetchVoterStatus(),
+            fetchKycStatus(),
+            checkIfAdmin(accounts[0]),
+            fetchCandidates(),
+            fetchElectionSettings(),
+            fetchCanViewResults(),
+          ]);
+        }
+      } catch (error) {
+        console.error("Failed to check existing connection:", error);
       }
     };
-    
+
     init();
-    
+
     return () => {
-      // Clean up listeners when component unmounts
       if (typeof window.ethereum !== 'undefined') {
         window.ethereum.removeAllListeners('accountsChanged');
       }
@@ -164,38 +158,41 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
 
   const connectWallet = async () => {
     if (typeof window.ethereum === 'undefined') {
-      toast.error("MetaMask is not installed. Please install MetaMask to use this application.");
+      toast.error("MetaMask is not installed.");
       return;
     }
+
+    if (isConnecting || isConnected) return;
 
     setIsConnecting(true);
 
     try {
-      // Request account access
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      const accounts = await web3Provider.send('eth_requestAccounts', []);
       if (accounts.length > 0) {
         setAccount(accounts[0]);
         setIsConnected(true);
-        
-        // Create contract instance
-        const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
         const signer = web3Provider.getSigner();
         const votingContract = new ethers.Contract(CONTRACT_ADDRESS, VotingContractABI, signer);
-        
         setProvider(web3Provider);
         setContract(votingContract);
-        
-        await fetchVoterStatus();
-        await fetchKycStatus();
-        await checkIfAdmin(accounts[0]);
-        await fetchCandidates();
-        
+        await Promise.all([
+          fetchVoterStatus(),
+          fetchKycStatus(),
+          checkIfAdmin(accounts[0]),
+          fetchCandidates(),
+          fetchElectionSettings(),
+          fetchCanViewResults(),
+        ]);
         toast.success("Wallet connected successfully!");
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (error.code === -32002) {
+        toast.error("MetaMask request already pending. Please check MetaMask.");
+      } else {
+        toast.error("Failed to connect wallet.");
+      }
       console.error("Error connecting to MetaMask:", error);
-      toast.error("Failed to connect wallet. Please try again.");
     } finally {
       setIsConnecting(false);
     }
@@ -203,87 +200,69 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
 
   const fetchKycStatus = async () => {
     if (!account) {
-      setKycStatus({ status: 'not submitted' });
+      setKycStatus({ status: 'NotSubmitted' });
       return;
     }
 
     try {
       const response = await axios.get(`${API_URL}/kyc/status/${account}`);
-      if (response.status === 200) {
-        setKycStatus({
-          status: response.data.status,
-          feedback: response.data.feedback,
-          submittedAt: new Date(response.data.submittedAt)
-        });
-      }
+      setKycStatus({
+        status: response.data.data.status,
+        feedback: response.data.data.feedback,
+        submittedAt: response.data.data.submittedAt ? new Date(response.data.data.submittedAt) : undefined,
+      });
     } catch (error: any) {
-      if (error.response && error.response.status === 404) {
-        // 404 means no KYC found, which is a normal state
-        setKycStatus({ status: 'not submitted' });
+      if (error.response?.status === 404) {
+        setKycStatus({ status: 'NotSubmitted' });
       } else {
         console.error("Error fetching KYC status:", error);
-        // Keep the current status in case of error
       }
     }
   };
 
   const fetchCandidates = async () => {
     try {
-      // Try to fetch from real backend
-      try {
-        const response = await axios.get(`${API_URL}/candidates`);
-        if (response.status === 200) {
-          setCandidates(response.data.map((candidate: any, index: number) => ({
-            id: candidate._id || index + 1,
-            name: candidate.name,
-            party: candidate.party,
-            imageUrl: candidate.imageUrl || '/placeholder.svg',
-            voteCount: candidate.voteCount || 0,
-            position: candidate.position || '',
-            isActive: candidate.isActive || true
-          })));
-          return;
-        }
-      } catch (apiError) {
-        console.log('Candidates API not available, trying contract');
-      }
-
-      // If API fails, try to get from contract
+      const response = await axios.get(`${API_URL}/candidates`);
+      setCandidates(response.data.data.map((candidate: any) => ({
+        id: candidate._id,
+        name: candidate.name,
+        party: candidate.party,
+        imageUrl: candidate.imageUrl || '/placeholder.svg',
+        voteCount: candidate.voteCount || 0,
+        position: candidate.position?._id || '',
+        isActive: candidate.isActive || true,
+      })));
+    } catch (error) {
+      console.error("Error fetching candidates:", error);
       if (contract) {
         try {
           const count = await contract.getCandidateCount();
           const candidatesList: Candidate[] = [];
-          
           for (let i = 0; i < count; i++) {
             const [id, name, party, imageUrl, voteCount, position, isActive] = await contract.getCandidate(i);
             candidatesList.push({
-              id: id.toNumber(),
+              id: id.toString(),
               name,
               party,
               imageUrl,
               voteCount: voteCount.toNumber(),
               position,
-              isActive
+              isActive,
             });
           }
-          
           setCandidates(candidatesList);
-          return;
         } catch (contractError) {
           console.error("Error fetching candidates from contract:", contractError);
+          toast.error("Failed to fetch candidates.");
         }
+      } else {
+        toast.error("Failed to fetch candidates.");
       }
-
-      toast.error("Failed to fetch candidates. Please try again later.");
-    } catch (error) {
-      console.error("Error fetching candidates:", error);
-      toast.error("Failed to fetch candidates.");
     }
   };
 
   const fetchVoterStatus = async () => {
     if (!contract || !account) {
-      // For demo purposes, use mock data
       setVoterStatus({ isRegistered: true, hasVoted: false });
       return;
     }
@@ -299,7 +278,6 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
 
   const checkIfAdmin = async (address: string) => {
     if (!contract) {
-      // For demo purposes, use mock admin status (make the connected wallet admin)
       setIsAdmin(true);
       return;
     }
@@ -315,35 +293,38 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
 
   const fetchElectionSettings = async () => {
     try {
-      // Try to fetch from API first
-      try {
-        const response = await axios.get(`${API_URL}/election/settings`);
-        if (response.status === 200) {
-          setElectionSettings({
-            startTime: new Date(response.data.startTime).getTime() / 1000,
-            endTime: new Date(response.data.endTime).getTime() / 1000,
-            resultsPublished: response.data.resultsPublished,
-            realTimeResults: response.data.realTimeResults
-          });
-          return;
-        }
-      } catch (apiError) {
-        console.log('Election settings API not available, using contract');
-      }
-
-      // Fallback to contract
-      if (contract && account) {
-        const [startTime, endTime, resultsPublished, realTimeResults] = await contract.getElectionStatus();
+      const response = await axios.get(`${API_URL}/election/settings`);
+      setElectionSettings({
+        startTime: new Date(response.data.data.startTime).getTime() / 1000,
+        endTime: new Date(response.data.data.endTime).getTime() / 1000,
+        resultsPublished: response.data.data.resultsPublished,
+        realTimeResults: response.data.data.realTimeResults,
+      });
+    } catch (error: any) {
+      if (error.response?.status === 404) {
         setElectionSettings({
-          startTime: startTime.toNumber(),
-          endTime: endTime.toNumber(),
-          resultsPublished,
-          realTimeResults
+          startTime: 0,
+          endTime: 0,
+          resultsPublished: false,
+          realTimeResults: false,
         });
+      } else if (contract && account) {
+        try {
+          const [startTime, endTime, resultsPublished, realTimeResults] = await contract.getElectionStatus();
+          setElectionSettings({
+            startTime: startTime.toNumber(),
+            endTime: endTime.toNumber(),
+            resultsPublished,
+            realTimeResults,
+          });
+        } catch (contractError) {
+          console.error("Error fetching election settings from contract:", contractError);
+          toast.error("Failed to fetch election settings.");
+        }
+      } else {
+        console.error("Error fetching election settings:", error);
+        toast.error("Failed to fetch election settings.");
       }
-    } catch (error) {
-      console.error('Error fetching election settings:', error);
-      toast.error('Failed to fetch election settings');
     }
   };
 
@@ -354,25 +335,23 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     }
 
     try {
-      // Try API first
-      try {
-        const response = await axios.get(`${API_URL}/election/can-view-results/${account}`);
-        if (response.status === 200) {
-          setCanViewResults(response.data.canView);
-          return;
+      const response = await axios.get(`${API_URL}/election/can-view-results/${account}`);
+      setCanViewResults(response.data.data.canView);
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        setCanViewResults(false);
+      } else if (contract) {
+        try {
+          const canView = await contract.canViewResults(account);
+          setCanViewResults(canView);
+        } catch (contractError) {
+          console.error("Error checking results visibility from contract:", contractError);
+          setCanViewResults(false);
         }
-      } catch (apiError) {
-        console.log('Results visibility API not available, using contract');
+      } else {
+        console.error("Error checking results visibility:", error);
+        setCanViewResults(false);
       }
-
-      // Fallback to contract
-      if (contract && account) {
-        const canView = await contract.canViewResults(account);
-        setCanViewResults(canView);
-      }
-    } catch (error) {
-      console.error('Error checking results visibility:', error);
-      setCanViewResults(false);
     }
   };
 
@@ -382,35 +361,27 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
-    try {
-      if (!contract) {
-        toast.error("Contract not initialized. Please connect your wallet.");
-        return;
-      }
+    if (!contract) {
+      toast.error("Contract not initialized.");
+      return;
+    }
 
-      // Add candidate to blockchain first
-      const tx = await contract.addCandidate(name, party, position);
-      toast.info("Adding candidate... Please wait for confirmation.");
-      
+    try {
+      const tx = await contract.addCandidate(name, party, imageUrl || '/placeholder.svg', position);
+      toast.info("Adding candidate...");
       const receipt = await tx.wait();
-      
-      // Get the candidate ID from the event
-      const event = receipt.events?.find(e => e.event === 'CandidateAdded');
-      const candidateId = event?.args?.candidateId.toNumber();
-      
-      if (!candidateId) {
-        throw new Error('Failed to get candidate ID from event');
-      }
-      
-      // Then add to API with the on-chain ID
-      await axios.post(`${API_URL}/candidates`, { 
-        name, 
-        party, 
-        position, 
+      const event = receipt.events?.find((e: any) => e.event === 'CandidateAdded');
+      const candidateId = event?.args?.candidateId.toString();
+      if (!candidateId) throw new Error('Failed to get candidate ID');
+
+      await axios.post(`${API_URL}/candidates`, {
+        name,
+        party,
+        position,
         imageUrl: imageUrl || '/placeholder.svg',
-        onChainId: candidateId
+        onChainId: candidateId,
       });
-      
+
       toast.success("Candidate added successfully!");
       await fetchCandidates();
     } catch (error) {
@@ -420,34 +391,25 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   };
 
   const registerVoter = async (address: string) => {
-    if (!contract) {
-      toast.error("Contract not initialized. Please connect your wallet.");
-      return;
-    }
-
-    if (!isAdmin) {
+    if (!contract || !isAdmin) {
       toast.error("Only admins can register voters.");
       return;
     }
 
     try {
       const tx = await contract.registerVoter(address);
-      toast.info("Registering voter... Please wait for confirmation.");
-      
+      toast.info("Registering voter...");
       await tx.wait();
       toast.success("Voter registered successfully!");
-      
-      if (address === account) {
-        await fetchVoterStatus();
-      }
+      if (address === account) await fetchVoterStatus();
     } catch (error) {
       console.error("Error registering voter:", error);
       toast.error("Failed to register voter.");
     }
   };
 
-  const castVote = async (candidateId: number, position: string) => {
-    if (!account || !provider) {
+  const castVote = async (candidateId: string, position: string, electionId: string) => {
+    if (!account || !provider || !contract) {
       toast.error("Please connect your wallet to vote.");
       return;
     }
@@ -457,81 +419,51 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
-    if (voterStatus.hasVoted) {
-      toast.error("You have already voted for this position.");
-      return;
-    }
-
-    if (kycStatus.status !== 'approved') {
+    if (kycStatus.status !== 'Approved') {
       toast.error("Your KYC must be approved before voting.");
       return;
     }
 
     try {
-      // Use gasless transactions
-      if (contract) {
-        // Get the signer
-        const signer = provider.getSigner();
-        
-        // Encode the function call
-        const functionSignature = contract.interface.encodeFunctionData(
-          'vote', [candidateId, position]
-        );
-        
-        // Get the nonce for the user
-        const nonce = await contract.getNonce(account);
-        
-        // Create meta transaction
-        const metaTx = await createMetaTransaction(
-          signer,
-          CONTRACT_ADDRESS,
-          functionSignature,
-          nonce.toNumber()
-        );
-        
-        // Send the meta transaction to the relayer
-        toast.info("Casting your vote... Please wait for confirmation.");
-        const txHash = await executeMetaTransaction(metaTx, RELAYER_URL);
-        
-        toast.success("Vote cast successfully!");
-        
-        await fetchVoterStatus();
-        await fetchCandidates();
-        await fetchCanViewResults();
-      } else {
-        toast.error("Contract not initialized. Please connect your wallet.");
-      }
+      const signer = provider.getSigner();
+      const functionSignature = contract.interface.encodeFunctionData('castVote', [candidateId, position]);
+      const nonce = await contract.getNonce(account);
+      const metaTx = await createMetaTransaction(signer, CONTRACT_ADDRESS, functionSignature, nonce.toNumber());
+      toast.info("Casting vote...");
+      const txHash = await executeMetaTransaction(metaTx, RELAYER_URL);
+
+      await axios.post(`${API_URL}/votes`, {
+        voterAddress: account,
+        candidateId,
+        position,
+        electionId,
+        txHash,
+      });
+
+      toast.success("Vote cast successfully!");
+      await Promise.all([fetchVoterStatus(), fetchCandidates(), fetchCanViewResults()]);
     } catch (error) {
       console.error("Error casting vote:", error);
       toast.error("Failed to cast vote.");
     }
   };
 
-  const disqualifyCandidate = async (candidateId: number) => {
+  const disqualifyCandidate = async (candidateId: string) => {
     if (!isAdmin) {
       toast.error("Only admins can disqualify candidates.");
       return;
     }
 
-    try {
-      if (!contract) {
-        toast.error("Contract not initialized. Please connect your wallet.");
-        return;
-      }
+    if (!contract) {
+      toast.error("Contract not initialized.");
+      return;
+    }
 
-      // Disqualify on blockchain
+    try {
       const tx = await contract.disqualifyCandidate(candidateId);
-      toast.info("Disqualifying candidate... Please wait for confirmation.");
-      
+      toast.info("Disqualifying candidate...");
       await tx.wait();
-      
-      // Find the candidate in our list
-      const candidate = candidates.find(c => c.id === candidateId);
-      if (candidate) {
-        // Update in API
-        await axios.put(`${API_URL}/candidates/${candidate.id}/disqualify`);
-      }
-      
+      await axios.put(`${API_URL}/candidates/${candidateId}/disqualify`);
       toast.success("Candidate disqualified successfully!");
       await fetchCandidates();
     } catch (error) {
@@ -546,24 +478,19 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
-    try {
-      if (!contract) {
-        toast.error("Contract not initialized. Please connect your wallet.");
-        return;
-      }
+    if (!contract) {
+      toast.error("Contract not initialized.");
+      return;
+    }
 
-      // Update on blockchain
+    try {
       const tx = await contract.setElectionPeriod(startTime, endTime);
-      toast.info("Setting election period... Please wait for confirmation.");
-      
+      toast.info("Setting election period...");
       await tx.wait();
-      
-      // Update in API
-      await axios.post(`${API_URL}/election/settings`, { 
+      await axios.post(`${API_URL}/election/settings`, {
         startTime: new Date(startTime * 1000),
-        endTime: new Date(endTime * 1000)
+        endTime: new Date(endTime * 1000),
       });
-      
       toast.success("Election period set successfully!");
       await fetchElectionSettings();
     } catch (error) {
@@ -578,24 +505,18 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
-    try {
-      if (!contract) {
-        toast.error("Contract not initialized. Please connect your wallet.");
-        return;
-      }
+    if (!contract) {
+      toast.error("Contract not initialized.");
+      return;
+    }
 
-      // Update on blockchain
+    try {
       const tx = await contract.setResultsPublished(published);
-      toast.info(`${published ? 'Publishing' : 'Hiding'} results... Please wait for confirmation.`);
-      
+      toast.info(`${published ? 'Publishing' : 'Hiding'} results...`);
       await tx.wait();
-      
-      // Update in API
       await axios.post(`${API_URL}/election/settings`, { resultsPublished: published });
-      
       toast.success(`Results ${published ? 'published' : 'hidden'} successfully!`);
-      await fetchElectionSettings();
-      await fetchCanViewResults();
+      await Promise.all([fetchElectionSettings(), fetchCanViewResults()]);
     } catch (error) {
       console.error("Error setting results publication:", error);
       toast.error(`Failed to ${published ? 'publish' : 'hide'} results.`);
@@ -608,24 +529,18 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       return;
     }
 
-    try {
-      if (!contract) {
-        toast.error("Contract not initialized. Please connect your wallet.");
-        return;
-      }
+    if (!contract) {
+      toast.error("Contract not initialized.");
+      return;
+    }
 
-      // Update on blockchain
+    try {
       const tx = await contract.setRealTimeResults(enabled);
-      toast.info(`${enabled ? 'Enabling' : 'Disabling'} real-time results... Please wait for confirmation.`);
-      
+      toast.info(`${enabled ? 'Enabling' : 'Disabling'} real-time results...`);
       await tx.wait();
-      
-      // Update in API
       await axios.post(`${API_URL}/election/settings`, { realTimeResults: enabled });
-      
       toast.success(`Real-time results ${enabled ? 'enabled' : 'disabled'} successfully!`);
-      await fetchElectionSettings();
-      await fetchCanViewResults();
+      await Promise.all([fetchElectionSettings(), fetchCanViewResults()]);
     } catch (error) {
       console.error("Error setting real-time results:", error);
       toast.error(`Failed to ${enabled ? 'enable' : 'disable'} real-time results.`);
@@ -633,15 +548,11 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
-    if (account) {
-      fetchCanViewResults();
-    }
+    if (account) fetchCanViewResults();
   }, [account, electionSettings]);
 
   useEffect(() => {
-    if (account && contract) {
-      fetchElectionSettings();
-    }
+    if (account && contract) fetchElectionSettings();
   }, [account, contract]);
 
   const value = {
@@ -666,14 +577,10 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     setResultsPublished,
     setRealTimeResults,
     fetchElectionSettings,
-    fetchCanViewResults
+    fetchCanViewResults,
   };
 
-  return (
-    <Web3Context.Provider value={value}>
-      {children}
-    </Web3Context.Provider>
-  );
+  return <Web3Context.Provider value={value}>{children}</Web3Context.Provider>;
 };
 
 export default Web3Provider;

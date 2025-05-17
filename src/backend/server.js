@@ -8,8 +8,8 @@ const dotenv = require("dotenv");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { body, param, query, validationResult } = require("express-validator");
-const logger = require("winston");
-const redis = require("redis");
+const winston = require("winston");
+// const redis = require("redis");
 const http = require("http");
 const { Server } = require("socket.io");
 
@@ -17,14 +17,14 @@ const { Server } = require("socket.io");
 dotenv.config();
 
 // Configure logging
-logger.configure({
+const logger = winston.createLogger({
   transports: [
-    new logger.transports.Console(),
-    new logger.transports.File({ filename: "server.log" }),
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: "server.log" }),
   ],
-  format: logger.format.combine(
-    logger.format.timestamp(),
-    logger.format.json()
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
   ),
 });
 
@@ -38,36 +38,108 @@ if (missingEnvVars.length > 0) {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Redis client setup
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
-});
-redisClient.on("error", (err) => logger.error(`Redis error: ${err.message}`));
-redisClient.connect().then(() => logger.info("Redis connected"));
-
-// HTTP server for WebSocket
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
+// Redis client setup
+// const redisClient = redis.createClient({
+//   url: process.env.REDIS_URL || "redis://localhost:6379",
+// });
+// let redisConnected = false;
+// redisClient.on("error", (err) => {
+//   logger.error(`Redis error: ${err && err.message ? err.message : JSON.stringify(err)}`);
+//   // Only exit if Redis fails at startup
+//   if (!redisConnected) {
+//     logger.error("Failed to connect to Redis. Exiting server.");
+//     process.exit(1);
+//   }
+//   // After startup, just log errors and continue (degraded cache)
+// });
+// redisClient.connect()
+//   .then(() => {
+//     redisConnected = true;
+//     logger.info("Redis connected");
+//   })
+//   .catch((err) => {
+//     logger.error(`Redis initial connection failed: ${err && err.message ? err.message : JSON.stringify(err)}`);
+//     process.exit(1);
+//   });
+
+// Helper: Safe Redis DEL with wildcard (for cache invalidation)
+// async function safeRedisDel(pattern) {
+//   if (!redisConnected) return;
+//   try {
+//     const keys = await redisClient.keys(pattern);
+//     if (keys.length > 0) await redisClient.del(keys);
+//   } catch (err) {
+//     logger.error(`Redis DEL error for pattern ${pattern}: ${err.message}`);
+//   }
+// }
+
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+    },
+  },
+}));
+
+// --- CORS FIX ---
+const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:8080";
 app.use(
   cors({
-    origin: process.env.ENABLE_CORS === "true" ? "*" : process.env.FRONTEND_URL,
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl, etc.)
+      if (!origin) return callback(null, allowedOrigin);
+      if (origin === allowedOrigin) return callback(null, allowedOrigin);
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
+    exposedHeaders: [
+      "RateLimit-Limit",
+      "RateLimit-Remaining",
+      "RateLimit-Reset",
+      "Retry-After",
+    ],
   })
 );
+
+// Ensure CORS headers are set on all responses, including errors and rate limits
+app.use((req, res, next) => {
+  const origin = process.env.FRONTEND_URL || "http://localhost:8080";
+  res.header("Access-Control-Allow-Origin", origin);
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Vary", "Origin");
+  next();
+});
+
 app.use(express.json());
+
+// --- RATE LIMITER ---
+// For development, set a high limit. Lower for production!
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 1000, // Increased for development
+    message: (req, res) => {
+      // Set CORS headers on 429 responses
+      const origin = process.env.FRONTEND_URL || "http://localhost:8080";
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header("Vary", "Origin");
+      return { success: false, error: "Too many requests" };
+    },
+    standardHeaders: true, // Return rate limit info in the RateLimit-* headers
+    legacyHeaders: false, // Disable the X-RateLimit-* headers
   })
 );
 
@@ -105,7 +177,7 @@ mongoose.connection.on("error", (err) => {
 
 // Schemas
 const kycSchema = new mongoose.Schema({
-  walletAddress: { type: String, required: true, unique: true },
+  walletAddress: { type: String, required: true, unique: true, index: true },
   idFrontPath: { type: String, required: true },
   idBackPath: { type: String, required: true },
   profilePicturePath: String,
@@ -115,11 +187,9 @@ const kycSchema = new mongoose.Schema({
     default: "Received",
   },
   feedback: String,
-  createdAt: { type: Date, default: Date.now },
+  createdAt: { type: Date, default: Date.now, index: true },
   updatedAt: { type: Date },
 });
-kycSchema.index({ createdAt: -1 });
-kycSchema.index({ status: 1 });
 
 const positionSchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
@@ -130,7 +200,7 @@ const positionSchema = new mongoose.Schema({
 const candidateSchema = new mongoose.Schema({
   name: { type: String, required: true },
   party: { type: String, default: "Independent" },
-  position: { type: mongoose.Schema.Types.ObjectId, ref: "Position", required: true },
+  position: { type: mongoose.Schema.Types.ObjectId, ref: "Position", required: true, index: true },
   imageUrl: { type: String, default: "/placeholder.svg" },
   voteCount: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true },
@@ -144,8 +214,7 @@ const voteSchema = new mongoose.Schema({
   electionId: { type: mongoose.Schema.Types.ObjectId, ref: "Election", required: true },
   timestamp: { type: Date, default: Date.now },
   txHash: String,
-});
-voteSchema.index({ voterAddress: 1, position: 1, electionId: 1 }, { unique: true });
+}, { indexes: [{ key: { voterAddress: 1, position: 1, electionId: 1 }, unique: true }] });
 
 const electionSettingsSchema = new mongoose.Schema({
   startTime: { type: Date, required: true },
@@ -182,7 +251,10 @@ const Election = mongoose.model("Election", electionSchema);
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadDir = path.join(__dirname, "uploads");
-    await fs.mkdir(uploadDir, { recursive: true });
+    await fs.mkdir(uploadDir, { recursive: true }).catch((err) => {
+      logger.error(`Failed to create upload directory: ${err.message}`);
+      cb(err);
+    });
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -215,7 +287,7 @@ const cleanupFiles = async (files) => {
   for (const field in files) {
     for (const file of files[field]) {
       try {
-        await fs.unlink(file.path).catch(() => {});
+        await fs.unlink(file.path);
       } catch (err) {
         logger.error(`Error deleting file ${file.path}: ${err.message}`);
       }
@@ -227,14 +299,21 @@ const cleanupFiles = async (files) => {
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return res.status(400).json({ success: false, error: errors.array()[0].msg });
   }
+  next();
+};
+
+// Placeholder for authentication middleware (to be implemented based on frontend)
+const authenticate = (req, res, next) => {
+  // TODO: Implement JWT or other auth mechanism
   next();
 };
 
 // KYC Endpoints
 app.post(
   "/api/kyc/submit",
+  authenticate,
   upload,
   [
     body("walletAddress")
@@ -249,15 +328,15 @@ app.post(
 
       if (!files?.idFront || !files?.idBack) {
         await cleanupFiles(files);
-        return res.status(400).json({ error: "Front and back ID documents required" });
+        return res.status(400).json({ success: false, error: "Front and back ID documents required" });
       }
 
-      const existingKYC = await KYC.findOne({ walletAddress });
+      const existingKYC = await KYC.findOne({ walletAddress }).lean();
       if (existingKYC && ["Pending", "Approved", "Received"].includes(existingKYC.status)) {
         await cleanupFiles(files);
         return res.status(400).json({
-          error: "KYC already submitted or approved",
-          status: existingKYC.status,
+          success: false,
+          error: `KYC already submitted with status: ${existingKYC.status}`,
         });
       }
 
@@ -272,10 +351,9 @@ app.post(
       };
 
       const newKYC = existingKYC
-        ? await KYC.findOneAndUpdate({ walletAddress }, kycData, { new: true })
+        ? await KYC.findOneAndUpdate({ walletAddress }, kycData, { new: true }).lean()
         : await new KYC(kycData).save();
 
-      // Emit WebSocket event
       io.emit("newKycSubmission", {
         _id: newKYC._id,
         walletAddress: newKYC.walletAddress,
@@ -283,15 +361,13 @@ app.post(
         createdAt: newKYC.createdAt,
       });
 
-      // Invalidate cache
-      await redisClient.del(`kyc:*`);
-
+      // await safeRedisDel('kyc:*');
       logger.info(`KYC submitted for wallet: ${walletAddress}`);
-      res.status(201).json({ message: "KYC submitted successfully", status: newKYC.status });
+      res.status(201).json({ success: true, data: { message: "KYC submitted successfully", status: newKYC.status } });
     } catch (error) {
       await cleanupFiles(req.files);
       logger.error(`KYC submission error: ${error.message}`);
-      res.status(500).json({ error: "Failed to submit KYC" });
+      res.status(500).json({ success: false, error: "Failed to submit KYC" });
     }
   }
 );
@@ -307,23 +383,22 @@ app.get(
   async (req, res) => {
     try {
       const kyc = await KYC.findOne({ walletAddress: req.params.walletAddress }).lean();
-      if (!kyc) {
-        return res.json({ status: "NotSubmitted", feedback: null, submittedAt: null });
-      }
       res.json({
-        status: kyc.status,
-        feedback: kyc.feedback,
-        submittedAt: kyc.createdAt,
+        success: true,
+        data: kyc
+          ? { status: kyc.status, feedback: kyc.feedback, submittedAt: kyc.createdAt }
+          : { status: "NotSubmitted", feedback: null, submittedAt: null },
       });
     } catch (error) {
       logger.error(`Fetch KYC status error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch KYC status" });
+      res.status(500).json({ success: false, error: "Failed to fetch KYC status" });
     }
   }
 );
 
 app.get(
   "/api/kyc",
+  authenticate,
   [
     query("page").optional().isInt({ min: 1 }).withMessage("Page must be a positive integer"),
     query("limit").optional().isInt({ min: 1, max: 100 }).withMessage("Limit must be between 1 and 100"),
@@ -338,42 +413,42 @@ app.get(
       const skip = (page - 1) * limit;
 
       const cacheKey = `kyc:${page}:${limit}:${sort}`;
-      const cached = await redisClient.get(cacheKey);
-      if (cached) {
-        logger.info("Serving KYC from cache");
-        return res.json(JSON.parse(cached));
-      }
+      // const cached = await redisClient.get(cacheKey);
+      // if (cached) {
+      //   logger.info("Serving KYC from cache");
+      //   return res.json(JSON.parse(cached));
+      // }
 
-      const kycSubmissions = await KYC.find()
-        .select("walletAddress status feedback createdAt updatedAt")
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean();
-
-      const total = await KYC.countDocuments();
+      const [kycSubmissions, total] = await Promise.all([
+        KYC.find()
+          .select("walletAddress status feedback createdAt updatedAt")
+          .sort(sort)
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        KYC.countDocuments(),
+      ]);
 
       const response = {
-        kycSubmissions,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit),
+        success: true,
+        data: {
+          kycSubmissions,
+          pagination: { page, limit, total, pages: Math.ceil(total / limit) },
         },
       };
 
-      await redisClient.setEx(cacheKey, 30, JSON.stringify(response));
+      // await redisClient.setEx(cacheKey, 30, JSON.stringify(response));
       res.json(response);
     } catch (error) {
       logger.error(`Fetch all KYC error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch KYC submissions" });
+      res.status(500).json({ success: false, error: "Failed to fetch KYC submissions" });
     }
   }
 );
 
 app.put(
   "/api/kyc/:id",
+  authenticate,
   [
     param("id").isMongoId().withMessage("Invalid KYC ID"),
     body("status")
@@ -390,22 +465,21 @@ app.put(
         { status, feedback, updatedAt: new Date() },
         { new: true }
       ).lean();
-      if (!kyc) return res.status(404).json({ error: "KYC not found" });
+      if (!kyc) return res.status(404).json({ success: false, error: "KYC not found" });
 
-      // Invalidate cache
-      await redisClient.del(`kyc:*`);
-
+      // await safeRedisDel('kyc:*');
       logger.info(`KYC updated: ${req.params.id}, status: ${status}`);
-      res.json(kyc);
+      res.json({ success: true, data: kyc });
     } catch (error) {
       logger.error(`Update KYC error: ${error.message}`);
-      res.status(500).json({ error: "Failed to update KYC" });
+      res.status(500).json({ success: false, error: "Failed to update KYC" });
     }
   }
 );
 
 app.put(
   "/api/kyc/bulk",
+  authenticate,
   [
     body("ids").isArray().withMessage("IDs must be an array"),
     body("ids.*").isMongoId().withMessage("Invalid KYC ID"),
@@ -420,30 +494,28 @@ app.put(
       const { ids, status, feedback } = req.body;
       const result = await KYC.updateMany(
         { _id: { $in: ids } },
-        { status, feedback, updatedAt: new Date() },
-        { new: true }
+        { status, feedback, updatedAt: new Date() }
       );
 
-      // Invalidate cache
-      await redisClient.del(`kyc:*`);
-
+      // await safeRedisDel('kyc:*');
       logger.info(`Bulk updated ${result.modifiedCount} KYC submissions to ${status}`);
-      res.json({ message: `Updated ${result.modifiedCount} KYC submissions` });
+      res.json({ success: true, data: { message: `Updated ${result.modifiedCount} KYC submissions` } });
     } catch (error) {
       logger.error(`Bulk update KYC error: ${error.message}`);
-      res.status(500).json({ error: "Failed to update KYC submissions" });
+      res.status(500).json({ success: false, error: "Failed to update KYC submissions" });
     }
   }
 );
 
 app.get(
   "/api/kyc/:id/documents",
+  authenticate,
   [param("id").isMongoId().withMessage("Invalid KYC ID")],
   validate,
   async (req, res) => {
     try {
       const kyc = await KYC.findById(req.params.id).lean();
-      if (!kyc) return res.status(404).json({ error: "KYC not found" });
+      if (!kyc) return res.status(404).json({ success: false, error: "KYC not found" });
 
       const documents = [];
       const addDocument = async (type, filePath) => {
@@ -462,11 +534,11 @@ app.get(
         addDocument("profilePicture", kyc.profilePicturePath),
       ]);
 
-      if (documents.length === 0) return res.status(404).json({ error: "No documents found" });
-      res.json(documents);
+      if (documents.length === 0) return res.status(404).json({ success: false, error: "No documents found" });
+      res.json({ success: true, data: documents });
     } catch (error) {
       logger.error(`Fetch KYC documents error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch KYC documents" });
+      res.status(500).json({ success: false, error: "Failed to fetch KYC documents" });
     }
   }
 );
@@ -481,19 +553,18 @@ app.get(
   async (req, res) => {
     try {
       const fields = req.query.fields ? req.query.fields.split(",") : null;
-      const positions = await Position.find({ isActive: true })
-        .select(fields)
-        .lean();
-      res.json(positions);
+      const positions = await Position.find({ isActive: true }).select(fields).lean();
+      res.json({ success: true, data: positions });
     } catch (error) {
       logger.error(`Fetch positions error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch positions" });
+      res.status(500).json({ success: false, error: "Failed to fetch positions" });
     }
   }
 );
 
 app.post(
   "/api/positions",
+  authenticate,
   [
     body("name").notEmpty().withMessage("Position name required"),
     body("description").optional().isString().withMessage("Description must be a string"),
@@ -504,15 +575,14 @@ app.post(
       const { name, description } = req.body;
       const existingPosition = await Position.findOne({ name }).lean();
       if (existingPosition) {
-        return res.status(400).json({ error: "Position name already exists" });
+        return res.status(400).json({ success: false, error: "Position name already exists" });
       }
-      const newPosition = new Position({ name, description });
-      await newPosition.save();
+      const newPosition = await new Position({ name, description }).save();
       logger.info(`Position created: ${name}`);
-      res.status(201).json(newPosition);
+      res.status(201).json({ success: true, data: newPosition });
     } catch (error) {
       logger.error(`Create position error: ${error.message}`);
-      res.status(500).json({ error: "Failed to add position" });
+      res.status(500).json({ success: false, error: "Failed to add position" });
     }
   }
 );
@@ -531,10 +601,10 @@ app.get(
         .populate("position")
         .select(fields)
         .lean();
-      res.json(candidates);
+      res.json({ success: true, data: candidates });
     } catch (error) {
       logger.error(`Fetch candidates error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch candidates" });
+      res.status(500).json({ success: false, error: "Failed to fetch candidates" });
     }
   }
 );
@@ -549,16 +619,17 @@ app.get(
         position: req.params.position,
         isActive: true,
       }).lean();
-      res.json(candidates);
+      res.json({ success: true, data: candidates });
     } catch (error) {
       logger.error(`Fetch candidates by position error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch candidates" });
+      res.status(500).json({ success: false, error: "Failed to fetch candidates" });
     }
   }
 );
 
 app.post(
   "/api/candidates",
+  authenticate,
   [
     body("name").notEmpty().withMessage("Name required"),
     body("position").isMongoId().withMessage("Invalid position ID"),
@@ -571,27 +642,27 @@ app.post(
     try {
       const { name, party, position, imageUrl, onChainId } = req.body;
       if (!(await Position.findById(position).lean())) {
-        return res.status(400).json({ error: "Invalid position" });
+        return res.status(400).json({ success: false, error: "Invalid position" });
       }
-      const candidate = new Candidate({
+      const candidate = await new Candidate({
         name,
         party: party || "Independent",
         position,
         imageUrl,
         onChainId,
-      });
-      await candidate.save();
+      }).save();
       logger.info(`Candidate created: ${name}`);
-      res.status(201).json(candidate);
+      res.status(201).json({ success: true, data: candidate });
     } catch (error) {
       logger.error(`Create candidate error: ${error.message}`);
-      res.status(500).json({ error: "Failed to add candidate" });
+      res.status(500).json({ success: false, error: "Failed to add candidate" });
     }
   }
 );
 
 app.put(
   "/api/candidates/:id",
+  authenticate,
   [
     param("id").isMongoId().withMessage("Invalid candidate ID"),
     body("name").optional().notEmpty().withMessage("Name cannot be empty"),
@@ -604,42 +675,44 @@ app.put(
     try {
       const { name, party, position, imageUrl } = req.body;
       if (position && !(await Position.findById(position).lean())) {
-        return res.status(400).json({ error: "Invalid position" });
+        return res.status(400).json({ success: false, error: "Invalid position" });
       }
       const candidate = await Candidate.findByIdAndUpdate(
         req.params.id,
         { name, party, position, imageUrl },
         { new: true }
       ).lean();
-      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+      if (!candidate) return res.status(404).json({ success: false, error: "Candidate not found" });
       logger.info(`Candidate updated: ${req.params.id}`);
-      res.json(candidate);
+      res.json({ success: true, data: candidate });
     } catch (error) {
       logger.error(`Update candidate error: ${error.message}`);
-      res.status(500).json({ error: "Failed to update candidate" });
+      res.status(500).json({ success: false, error: "Failed to update candidate" });
     }
   }
 );
 
 app.delete(
   "/api/candidates/:id",
+  authenticate,
   [param("id").isMongoId().withMessage("Invalid candidate ID")],
   validate,
   async (req, res) => {
     try {
       const candidate = await Candidate.findByIdAndDelete(req.params.id).lean();
-      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+      if (!candidate) return res.status(404).json({ success: false, error: "Candidate not found" });
       logger.info(`Candidate deleted: ${req.params.id}`);
-      res.json({ message: "Candidate deleted" });
+      res.json({ success: true, data: { message: "Candidate deleted" } });
     } catch (error) {
       logger.error(`Delete candidate error: ${error.message}`);
-      res.status(500).json({ error: "Failed to delete candidate" });
+      res.status(500).json({ success: false, error: "Failed to delete candidate" });
     }
   }
 );
 
 app.put(
   "/api/candidates/:id/disqualify",
+  authenticate,
   [param("id").isMongoId().withMessage("Invalid candidate ID")],
   validate,
   async (req, res) => {
@@ -649,12 +722,12 @@ app.put(
         { isActive: false },
         { new: true }
       ).lean();
-      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+      if (!candidate) return res.status(404).json({ success: false, error: "Candidate not found" });
       logger.info(`Candidate disqualified: ${req.params.id}`);
-      res.json(candidate);
+      res.json({ success: true, data: candidate });
     } catch (error) {
       logger.error(`Disqualify candidate error: ${error.message}`);
-      res.status(500).json({ error: "Failed to disqualify candidate" });
+      res.status(500).json({ success: false, error: "Failed to disqualify candidate" });
     }
   }
 );
@@ -662,6 +735,7 @@ app.put(
 // Election Endpoints
 app.post(
   "/api/elections",
+  authenticate,
   [
     body("title").notEmpty().withMessage("Title required"),
     body("startDate").isISO8601().withMessage("Invalid start date"),
@@ -676,27 +750,26 @@ app.post(
       const { title, description, startDate, endDate, candidateIds } = req.body;
       const candidates = await Candidate.find({ _id: { $in: candidateIds } }).lean();
       if (candidates.length !== candidateIds.length) {
-        return res.status(400).json({ error: "Invalid candidate IDs" });
+        return res.status(400).json({ success: false, error: "Invalid candidate IDs" });
       }
       const start = new Date(startDate);
       const end = new Date(endDate);
       if (start >= end) {
-        return res.status(400).json({ error: "End date must be after start date" });
+        return res.status(400).json({ success: false, error: "End date must be after start date" });
       }
-      const election = new Election({
+      const election = await new Election({
         title,
         description,
         startDate: start,
         endDate: end,
         candidates: candidateIds,
         status: new Date() >= start ? "active" : "upcoming",
-      });
-      await election.save();
+      }).save();
       logger.info(`Election created: ${title}`);
-      res.status(201).json(election);
+      res.status(201).json({ success: true, data: election });
     } catch (error) {
       logger.error(`Create election error: ${error.message}`);
-      res.status(500).json({ error: "Failed to create election" });
+      res.status(500).json({ success: false, error: "Failed to create election" });
     }
   }
 );
@@ -725,10 +798,10 @@ app.get(
             : "upcoming",
         participantsCount: election.candidates.length,
       }));
-      res.json(updatedElections);
+      res.json({ success: true, data: updatedElections });
     } catch (error) {
       logger.error(`Fetch elections error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch elections" });
+      res.status(500).json({ success: false, error: "Failed to fetch elections" });
     }
   }
 );
@@ -740,7 +813,7 @@ app.get(
   async (req, res) => {
     try {
       const election = await Election.findById(req.params.id).populate("candidates").lean();
-      if (!election) return res.status(404).json({ error: "Election not found" });
+      if (!election) return res.status(404).json({ success: false, error: "Election not found" });
       const currentDate = new Date();
       const status =
         currentDate >= new Date(election.endDate)
@@ -748,10 +821,10 @@ app.get(
           : currentDate >= new Date(election.startDate)
           ? "active"
           : "upcoming";
-      res.json({ ...election, status, participantsCount: election.candidates.length });
+      res.json({ success: true, data: { ...election, status, participantsCount: election.candidates.length } });
     } catch (error) {
       logger.error(`Fetch election error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch election" });
+      res.status(500).json({ success: false, error: "Failed to fetch election" });
     }
   }
 );
@@ -773,29 +846,30 @@ app.post(
       const { voterAddress, candidateId, position, electionId } = req.body;
       const election = await Election.findById(electionId).lean();
       if (!election || election.status !== "active") {
-        return res.status(400).json({ error: "Election not active" });
+        return res.status(400).json({ success: false, error: "Election not active" });
       }
       const kyc = await KYC.findOne({ walletAddress: voterAddress }).lean();
       if (!kyc || kyc.status !== "Approved") {
-        return res.status(403).json({ error: "KYC not approved" });
+        return res.status(403).json({ success: false, error: "KYC not approved" });
       }
       const candidate = await Candidate.findById(candidateId).lean();
       if (!candidate || !election.candidates.includes(candidateId)) {
-        return res.status(400).json({ error: "Invalid candidate" });
+        return res.status(400).json({ success: false, error: "Invalid candidate" });
       }
       const existingVote = await Vote.findOne({ voterAddress, position, electionId }).lean();
       if (existingVote) {
-        return res.status(400).json({ error: "Already voted for this position" });
+        return res.status(400).json({ success: false, error: "Already voted for this position" });
       }
-      const vote = new Vote({ voterAddress, candidateId, position, electionId });
-      await vote.save();
-      await Candidate.findByIdAndUpdate(candidateId, { $inc: { voteCount: 1 } });
-      await Election.findByIdAndUpdate(electionId, { $inc: { votersCount: 1 } });
+      const vote = await new Vote({ voterAddress, candidateId, position, electionId }).save();
+      await Promise.all([
+        Candidate.findByIdAndUpdate(candidateId, { $inc: { voteCount: 1 } }),
+        Election.findByIdAndUpdate(electionId, { $inc: { votersCount: 1 } }),
+      ]);
       logger.info(`Vote recorded: ${voterAddress} for candidate ${candidateId}`);
-      res.status(201).json({ message: "Vote recorded" });
+      res.status(201).json({ success: true, data: { message: "Vote recorded" } });
     } catch (error) {
       logger.error(`Record vote error: ${error.message}`);
-      res.status(500).json({ error: "Failed to record vote" });
+      res.status(500).json({ success: false, error: "Failed to record vote" });
     }
   }
 );
@@ -813,7 +887,7 @@ app.get(
     try {
       const { account, electionId } = req.params;
       const election = await Election.findById(electionId).populate("candidates").lean();
-      if (!election) return res.status(404).json({ error: "Election not found" });
+      if (!election) return res.status(404).json({ success: false, error: "Election not found" });
       const positions = [...new Set(election.candidates.map((c) => c.position.toString()))];
       const votes = await Vote.find({ voterAddress: account, electionId }).lean();
       const voteStatus = positions.map((positionId) => ({
@@ -822,24 +896,27 @@ app.get(
           positionId,
         hasVoted: votes.some((v) => v.position.toString() === positionId),
       }));
-      res.json(voteStatus);
+      res.json({ success: true, data: voteStatus });
     } catch (error) {
       logger.error(`Fetch vote status error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch vote status" });
+      res.status(500).json({ success: false, error: "Failed to fetch vote status" });
     }
   }
 );
 
-app.get("/api/votes/all", async (req, res) => {
+app.get(
+  "/api/votes/all",
+  authenticate,
+  async (req, res) => {
     try {
       const votes = await Vote.find()
         .populate("candidateId", "name party position")
         .sort({ timestamp: -1 })
         .lean();
-      res.json(votes);
+      res.json({ success: true, data: votes });
     } catch (error) {
       logger.error(`Fetch all votes error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch votes" });
+      res.status(500).json({ success: false, error: "Failed to fetch votes" });
     }
   }
 );
@@ -847,6 +924,7 @@ app.get("/api/votes/all", async (req, res) => {
 // Election Settings Endpoints
 app.post(
   "/api/election/settings",
+  authenticate,
   [
     body("startTime").isISO8601().withMessage("Invalid start time"),
     body("endTime").isISO8601().withMessage("Invalid end time"),
@@ -868,21 +946,20 @@ app.post(
             realTimeResults,
           },
           { new: true }
-        );
+        ).lean();
       } else {
-        settings = new ElectionSettings({
+        settings = await new ElectionSettings({
           startTime: new Date(startTime),
           endTime: new Date(endTime),
           resultsPublished,
           realTimeResults,
-        });
-        await settings.save();
+        }).save();
       }
       logger.info("Election settings updated");
-      res.json(settings);
+      res.json({ success: true, data: settings });
     } catch (error) {
       logger.error(`Update election settings error: ${error.message}`);
-      res.status(500).json({ error: "Failed to update election settings" });
+      res.status(500).json({ success: false, error: "Failed to update election settings" });
     }
   }
 );
@@ -890,11 +967,11 @@ app.post(
 app.get("/api/election/settings", async (req, res) => {
   try {
     const settings = await ElectionSettings.findOne().lean();
-    if (!settings) return res.status(404).json({ error: "Election settings not found" });
-    res.json(settings);
+    if (!settings) return res.status(404).json({ success: false, error: "Election settings not found" });
+    res.json({ success: true, data: settings });
   } catch (error) {
     logger.error(`Fetch election settings error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch election settings" });
+    res.status(500).json({ success: false, error: "Failed to fetch election settings" });
   }
 });
 
@@ -910,15 +987,15 @@ app.get(
     try {
       const { voterAddress } = req.params;
       const settings = await ElectionSettings.findOne().lean();
-      if (!settings) return res.status(404).json({ error: "Election settings not found" });
+      if (!settings) return res.status(404).json({ success: false, error: "Election settings not found" });
       if (settings.resultsPublished || settings.realTimeResults) {
-        return res.json({ canView: true });
+        return res.json({ success: true, data: { canView: true } });
       }
       const vote = await Vote.findOne({ voterAddress }).lean();
-      res.json({ canView: !!vote });
+      res.json({ success: true, data: { canView: !!vote } });
     } catch (error) {
       logger.error(`Check result visibility error: ${error.message}`);
-      res.status(500).json({ error: "Failed to check result visibility" });
+      res.status(500).json({ success: false, error: "Failed to check result visibility" });
     }
   }
 );
@@ -936,10 +1013,10 @@ app.get(
       })
         .sort({ voteCount: -1 })
         .lean();
-      res.json(candidates);
+      res.json({ success: true, data: candidates });
     } catch (error) {
       logger.error(`Fetch election results error: ${error.message}`);
-      res.status(500).json({ error: "Failed to fetch election results" });
+      res.status(500).json({ success: false, error: "Failed to fetch election results" });
     }
   }
 );
@@ -947,10 +1024,13 @@ app.get(
 // Health Check
 app.get("/api/healthcheck", (req, res) => {
   res.json({
-    status: "ok",
-    dbStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    redisStatus: redisClient.isOpen ? "connected" : "disconnected",
-    timestamp: new Date().toISOString(),
+    success: true,
+    data: {
+      status: "ok",
+      dbStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+      redisStatus: redisClient.isOpen ? "connected" : "disconnected",
+      timestamp: new Date().toISOString(),
+    },
   });
 });
 
@@ -966,18 +1046,23 @@ app.get("*", (req, res) => {
 app.use((err, req, res, next) => {
   logger.error(`Unhandled error: ${err.message}`);
   if (err.message.includes("Invalid file type")) {
-    return res.status(400).json({ error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
-  res.status(500).json({ error: "Internal server error" });
+  res.status(500).json({ success: false, error: "Internal server error" });
 });
 
 // Graceful shutdown
 const gracefulShutdown = async () => {
   logger.info("Received shutdown signal. Closing connections...");
-  await redisClient.quit();
-  await mongoose.connection.close();
-  logger.info("MongoDB and Redis connections closed");
-  process.exit(0);
+  try {
+    await redisClient.quit();
+    await mongoose.connection.close();
+    logger.info("MongoDB and Redis connections closed");
+    process.exit(0);
+  } catch (err) {
+    logger.error(`Shutdown error: ${err.message}`);
+    process.exit(1);
+  }
 };
 
 process.on("SIGINT", gracefulShutdown);

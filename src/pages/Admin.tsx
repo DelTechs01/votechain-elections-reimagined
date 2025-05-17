@@ -1,50 +1,71 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
-import {
-  AlertCircle,
-  Shield,
-  User,
-  Users,
-  Award,
-  Calendar,
-} from "lucide-react";
-import { useWeb3 } from "../context/Web3Context";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { TooltipProvider } from "../components/ui/tooltip";
+import { AlertCircle, Shield, User, Users, Award, Calendar } from "lucide-react";
+import { useWeb3 } from "@/context/Web3Context";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@radix-ui/react-tabs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { TooltipProvider } from "@radix-ui/react-tooltip";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import CandidatesPanel from "../components/admin/CandidatesPanel";
-import PositionsPanel from "../components/admin/positionsPanel";
-import KycPanel from "../components/admin/KYCPanel";
+import PositionsPanel from "../components/admin/PositionsPanel";
+import KycPanel from "../components/admin/KycPanel";
 import ElectionsPanel from "../components/admin/ElectionsPanel";
-import { API_URL } from "../components/admin/config";
-import { useApi } from "../utils/api";
-import { Candidate, Position, KycSubmission, Election } from "../adminTypes";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+const fetchWithBackoff = async (url: string, retries = 3, delay = 1000) => {
+  try {
+    const response = await axios.get(url, { withCredentials: true });
+    return response.data.data;
+  } catch (error: any) {
+    if (error.response?.status === 429 && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return fetchWithBackoff(url, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
 
 const Admin = () => {
   const { account, isAdmin } = useWeb3();
-  const { get } = useApi();
 
-  // Fetch all data centrally
-  const { data: positions = [], isLoading: isLoadingPositions } = get<Position[]>(
-    `${API_URL}/positions`,
-    ["positions"]
-  );
+  const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
+    queryKey: ["positions"],
+    queryFn: () => fetchWithBackoff(`${API_URL}/positions`),
+    enabled: !!account && isAdmin,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const { data: candidates = [], isLoading: isLoadingCandidates } = get<Candidate[]>(
-    `${API_URL}/candidates`,
-    ["candidates"]
-  );
+  const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
+    queryKey: ["candidates"],
+    queryFn: () => fetchWithBackoff(`${API_URL}/candidates`),
+    enabled: !!account && isAdmin,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const { data: kycSubmissions = [], isLoading: isLoadingKyc } = get<KycSubmission[]>(
-    `${API_URL}/kyc/all`,
-    ["kycSubmissions"]
-  );
+  const { data: kycSubmissions = { kycSubmissions: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } }, isLoading: isLoadingKyc } = useQuery({
+    queryKey: ["kycSubmissions"],
+    queryFn: () => fetchWithBackoff(`${API_URL}/kyc?page=1&limit=20`),
+    enabled: !!account && isAdmin,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const { data: elections = [], isLoading: isLoadingElections } = get<Election[]>(
-    `${API_URL}/elections`,
-    ["elections"]
-  );
+  const { data: elections = [], isLoading: isLoadingElections } = useQuery({
+    queryKey: ["elections"],
+    queryFn: () => fetchWithBackoff(`${API_URL}/elections`),
+    enabled: !!account && isAdmin,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     document.title = "Admin | VoteChain";
@@ -53,12 +74,7 @@ const Admin = () => {
     }
   }, [account]);
 
-  // Aggregate loading state
-  const isLoading =
-    isLoadingPositions ||
-    isLoadingCandidates ||
-    isLoadingKyc ||
-    isLoadingElections;
+  const isLoading = isLoadingPositions || isLoadingCandidates || isLoadingKyc || isLoadingElections;
 
   if (isLoading) {
     return (
@@ -71,7 +87,7 @@ const Admin = () => {
     );
   }
 
-  if (!isAdmin) {
+  if (!account || !isAdmin) {
     return (
       <div className="container mx-auto px-4 py-12">
         <Alert variant="destructive" className="max-w-2xl mx-auto">
@@ -118,19 +134,17 @@ const Admin = () => {
               ))}
             </TabsList>
 
-            <CandidatesPanel
-              candidates={candidates}
-              positions={positions}
-              isLoading={isLoading}
-            />
+            <TabsContent value="candidates">
+              <CandidatesPanel candidates={candidates} />
+            </TabsContent>
             <TabsContent value="positions">
-              <PositionsPanel positions={positions} isLoading={isLoading} />
+              <PositionsPanel positions={positions} />
             </TabsContent>
             <TabsContent value="kyc">
-              <KycPanel kycSubmissions={kycSubmissions} isLoading={isLoading} />
+              <KycPanel kycSubmissions={kycSubmissions.kycSubmissions || kycSubmissions} pagination={kycSubmissions.pagination} />
             </TabsContent>
             <TabsContent value="elections">
-              <ElectionsPanel elections={elections} isLoading={isLoading} />
+              <ElectionsPanel elections={elections} />
             </TabsContent>
           </Tabs>
         </motion.div>

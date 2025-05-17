@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const KYCPage = () => {
-  const { account, fetchKycStatus, kycStatus }: { account: string; fetchKycStatus: () => void; kycStatus: { status: 'not submitted' | 'pending' | 'approved' | 'rejected' | 'received'; submittedAt?: string | Date; feedback?: string } } = useWeb3();
+  const { account, fetchKycStatus, kycStatus }: { account: string; fetchKycStatus: () => void; kycStatus: { status: 'NotSubmitted' | 'Pending' | 'Approved' | 'Rejected' | 'Received'; submittedAt?: string | Date; feedback?: string } } = useWeb3();
   const [files, setFiles] = useState({
     idFront: null,
     idBack: null,
@@ -186,9 +186,17 @@ const KYCPage = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        withCredentials: true,
       });
-      
-      toast.success(response.data.message || 'KYC submitted successfully! Your ID is being verified.');
+      // Use correct path for feedback and status
+      const status = response.data?.data?.status || response.data?.status;
+      toast.success(
+        status === 'Pending' ? 'KYC submitted! Your ID is under review.' :
+        status === 'Received' ? 'KYC received and queued for review.' :
+        status === 'Approved' ? 'KYC approved! You can now vote.' :
+        status === 'Rejected' ? 'KYC rejected. Please check feedback.' :
+        'KYC submitted successfully!'
+      );
       fetchKycStatus();
       
       // Clear form
@@ -226,23 +234,23 @@ const KYCPage = () => {
 
         <div className="flex items-center gap-4">
           <div className="flex-shrink-0">
-            {kycStatus.status === 'approved' && <CheckCircle className="h-10 w-10 text-green-500" />}
-            {kycStatus.status === 'rejected' && <AlertCircle className="h-10 w-10 text-red-500" />}
-            {kycStatus.status === 'pending' && <Clock className="h-10 w-10 text-yellow-500" />}
-            {kycStatus.status === 'not submitted' && <AlertCircle className="h-10 w-10 text-gray-400" />}
+            {kycStatus.status === 'Approved' && <CheckCircle className="h-10 w-10 text-green-500" />}
+            {kycStatus.status === 'Rejected' && <AlertCircle className="h-10 w-10 text-red-500" />}
+            {kycStatus.status === 'Pending' && <Clock className="h-10 w-10 text-yellow-500" />}
+            {kycStatus.status === 'NotSubmitted' && <AlertCircle className="h-10 w-10 text-gray-400" />}
           </div>
           <div>
             <h3 className="text-lg font-medium">
-              {kycStatus.status === 'approved' && 'KYC Approved'}
-              {kycStatus.status === 'rejected' && 'KYC Rejected'}
-              {kycStatus.status === 'pending' && 'KYC Pending Review'}
-              {kycStatus.status === 'not submitted' && 'KYC Not Submitted'}
+              {kycStatus.status === 'Approved' && 'KYC Approved'}
+              {kycStatus.status === 'Rejected' && 'KYC Rejected'}
+              {kycStatus.status === 'Pending' && 'KYC Pending Review'}
+              {kycStatus.status === 'NotSubmitted' && 'KYC Not Submitted'}
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              {kycStatus.status === 'approved' && 'Your identity has been verified. You can now participate in elections without paying gas fees.'}
-              {kycStatus.status === 'rejected' && 'Your KYC was rejected. Please see feedback below.'}
-              {kycStatus.status === 'pending' && 'Your KYC is currently under review. This process may take 24-48 hours.'}
-              {kycStatus.status === 'not submitted' && 'Please submit your KYC to participate in elections.'}
+              {kycStatus.status === 'Approved' && 'Your identity has been verified. You can now participate in elections without paying gas fees.'}
+              {kycStatus.status === 'Rejected' && 'Your KYC was rejected. Please see feedback below.'}
+              {kycStatus.status === 'Pending' && 'Your KYC is currently under review. This process may take 24-48 hours.'}
+              {kycStatus.status === 'NotSubmitted' && 'Please submit your KYC to participate in elections.'}
             </p>
           </div>
         </div>
@@ -260,7 +268,7 @@ const KYCPage = () => {
           </div>
         )}
 
-        {kycStatus.status === 'rejected' && (
+        {kycStatus.status === 'Rejected' && (
           <div className="text-center pt-4">
             <Button onClick={() => document.getElementById('upload-tab')?.click()}>
               Submit New KYC
@@ -268,7 +276,7 @@ const KYCPage = () => {
           </div>
         )}
 
-        {kycStatus.status === 'not submitted' && (
+        {kycStatus.status === 'NotSubmitted' && (
           <div className="text-center pt-4">
             <Button onClick={() => document.getElementById('upload-tab')?.click()}>
               Submit KYC Now
@@ -276,7 +284,7 @@ const KYCPage = () => {
           </div>
         )}
 
-        {kycStatus.status === 'approved' && (
+        {kycStatus.status === 'Approved' && (
           <div className="text-center pt-4">
             <Button onClick={() => navigate('/elections')}>
               View Elections
@@ -339,7 +347,7 @@ const KYCPage = () => {
         </CardHeader>
         
         <CardContent>
-          <Tabs defaultValue={kycStatus.status !== 'not submitted' ? 'status' : 'upload'}>
+          <Tabs defaultValue={kycStatus.status !== 'NotSubmitted' ? 'status' : 'upload'}>
             <TabsList className="grid w-full grid-cols-2 mb-6">
               <TabsTrigger value="status" id="status-tab">
                 <CheckCircle className="mr-2 h-4 w-4" />
@@ -477,9 +485,9 @@ const KYCPage = () => {
                         !files.idBack || 
                         isSubmitting || 
                         !account ||
-                        kycStatus.status === 'received' || 
-                        kycStatus.status === 'approved' || 
-                        kycStatus.status === 'pending'
+                        kycStatus.status === 'Received' || 
+                        kycStatus.status === 'Approved' || 
+                        kycStatus.status === 'Pending'
                       } 
                       className="w-full"
                     >
@@ -492,19 +500,19 @@ const KYCPage = () => {
                       </p>
                     )}
                     
-                    {kycStatus.status === 'received' && (
+                    {kycStatus.status === 'Received' && (
                       <p className="text-sm text-blue-500 mt-2">
                         Your KYC is under review. Please wait for approval.
                       </p>
                     )}
 
-                    {kycStatus.status === 'pending' && (
+                    {kycStatus.status === 'Pending' && (
                       <p className="text-sm text-yellow-500 mt-2">
                         Your KYC is already under review. Please wait for approval.
                       </p>
                     )}
                     
-                    {kycStatus.status === 'approved' && (
+                    {kycStatus.status === 'Approved' && (
                       <p className="text-sm text-green-500 mt-2">
                         Your KYC is already approved. No need to submit again.
                       </p>
