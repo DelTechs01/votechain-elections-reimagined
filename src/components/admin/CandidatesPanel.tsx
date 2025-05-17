@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Candidate, Position } from "../../adminTypes";
-import { candidateSchema } from "../../adminSchema";
+import { Candidate, Position } from "../admin/adminTypes";
+import { candidateSchema } from "../admin/adminSchema";
 import { z } from "zod";
 import { useAccount } from "wagmi";
 import { useForm } from "react-hook-form";
-import { TabsContent } from "../../ui/tabs";
+//import { TabsContent } from "../../ui/tabs";
 import {
   Plus,
   Pencil,
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../../ui/dialog";
+} from "../ui/dialog";
 import {
   Form,
   FormControl,
@@ -27,15 +27,15 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "../../ui/form";
-import { Input } from "../../ui/input";
+} from "../ui/form";
+import { Input } from "../ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../../ui/select";
+} from "../ui/select";
 import {
   Table,
   TableBody,
@@ -43,18 +43,18 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../../ui/table";
+} from "../ui/table";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "../../ui/tooltip";
+} from "../ui/tooltip";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Button } from "../../ui/button";
-import { Card, CardContent } from "../../ui/card";
+import { Button } from "../ui/button";
+import { Card, CardContent } from "../ui/card";
 import { API_URL } from "./config";
-import { useApi } from "../../utils/api";
+import { useApi } from "../utils/api";
 
 interface CandidatesPanelProps {
   candidates: Candidate[];
