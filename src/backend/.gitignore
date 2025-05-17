@@ -14,17 +14,11 @@ node_modules
 
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-31337
-
-#environments
-.env
-
-# Logs
-logs
-*.log
-npm-debug.log*
-
-#dump files
-*.dump
-*.dmp
-*.sql
+#ignore dump files
 dump
+/votechain
+.env
+# Hardhat Ignition default folder for deployments against a testnet
+ignition/deployments/chain-5
+# Hardhat Ignition default folder for deployments against a mainnet
+ignition/deployments/chain-1

@@ -43,7 +43,7 @@ app.use(
     origin:
       process.env.ENABLE_CORS === "true"
         ? "*"
-        : process.env.FRONTEND_URL || "http://localhost:3000",
+        : process.env.FRONTEND_URL || "http://localhost:8080",
     credentials: true,
   })
 );
@@ -305,7 +305,7 @@ app.put(
   [
     param("id").isMongoId().withMessage("Invalid KYC ID"),
     body("status")
-      .isIn(["pending", "approved", "rejected"])
+      .isIn(["received", "Approved", "rejected"])
       .withMessage("Invalid status"),
     body("feedback").optional().isString().withMessage("Feedback must be a string"),
   ],
