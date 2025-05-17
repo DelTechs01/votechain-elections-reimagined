@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Calendar, Users, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { API_URL } from "@/components/admin/config";
 import {
   Card,
   CardContent,
@@ -12,24 +13,48 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useWeb3 } from "@/context/Web3Context";
+import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { toast } from "sonner";
+import { z } from "zod";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// Zod schema for Election to validate API response
+const ElectionSchema = z.object({
+  _id: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime(),
+  status: z.enum(["active", "upcoming", "ended"]),
+  participantsCount: z.number().int().nonnegative(),
+  votersCount: z.number().int().nonnegative(),
+  participation: z.number().min(0).max(100).optional(),
+});
 
-interface Election {
-  _id: string;
-  title: string;
-  description: string;
-  startDate: string;
-  endDate: string;
-  status: "active" | "upcoming" | "ended";
-  participantsCount: number;
-  votersCount: number;
-  participation: number;
-}
+type Election = z.infer<typeof ElectionSchema>;
+
+// Custom fetch function with exponential backoff for 429 errors
+const fetchWithBackoff = async (url: string, retries = 3, delay = 1000): Promise<Election[]> => {
+  try {
+    const response = await axios.get(url, { timeout: 10000 });
+    // Validate response data with Zod
+    const validatedData = z.array(ElectionSchema).parse(response.data);
+    return validatedData;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 429 && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return fetchWithBackoff(url, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
 
 const ElectionCard = ({ election }: { election: Election }) => {
   const { isConnected } = useWeb3();
@@ -62,21 +87,23 @@ const ElectionCard = ({ election }: { election: Election }) => {
   };
 
   const isVoteDisabled = election.status === "ended" || (!isConnected && election.status === "active");
-  const buttonText = election.status === "active"
-    ? isConnected
-      ? "Vote Now"
-      : "Connect Wallet to Vote"
-    : election.status === "upcoming"
-    ? "View Details"
-    : "See Results";
+  const buttonText =
+    election.status === "active"
+      ? isConnected
+        ? "Vote Now"
+        : "Connect Wallet to Vote"
+      : election.status === "upcoming"
+      ? "View Details"
+      : "See Results";
   const buttonTooltip = isVoteDisabled
     ? election.status === "ended"
       ? "This election has ended"
       : "Please connect your wallet to vote"
     : "";
-  const linkTo = election.status === "active" && isConnected && election._id
-    ? `/vote/${election._id}`
-    : `/elections/${election._id || ""}`; // Fallback to /elections if no ID
+  const linkTo =
+    election.status === "active" && isConnected && election._id
+      ? `/vote/${election._id}`
+      : `/elections/${election._id}`;
 
   return (
     <motion.div
@@ -89,9 +116,7 @@ const ElectionCard = ({ election }: { election: Election }) => {
           <div className="flex justify-between items-start">
             <CardTitle className="text-xl">{election.title}</CardTitle>
             <span
-              className={`px-2 py-1 text-xs rounded-full font-medium ${
-                statusColors[election.status]
-              }`}
+              className={`px-2 py-1 text-xs rounded-full font-medium ${statusColors[election.status]}`}
               aria-label={`Election status: ${election.status}`}
             >
               {election.status.charAt(0).toUpperCase() + election.status.slice(1)}
@@ -145,7 +170,8 @@ const ElectionCard = ({ election }: { election: Election }) => {
           <div className="text-sm flex items-center gap-1 text-slate-600 dark:text-slate-400">
             <Users className="h-4 w-4" aria-hidden="true" />
             <span>
-              {(election.votersCount || 0).toLocaleString()} voters • {election.participantsCount || 0} candidates
+              {(election.votersCount || 0).toLocaleString()} voters •{" "}
+              {election.participantsCount || 0} candidates
             </span>
           </div>
         </CardContent>
@@ -176,36 +202,30 @@ const ElectionCard = ({ election }: { election: Election }) => {
 
 const Elections = () => {
   const [filter, setFilter] = useState<"all" | "active" | "upcoming" | "ended">("all");
-  const [elections, setElections] = useState<Election[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { account } = useWeb3();
+
+  // Fetch elections with React Query
+  const {
+    data: elections = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["elections"],
+    queryFn: () => fetchWithBackoff(`${API_URL}/elections`),
+    enabled: !!account,
+    retry: 2,
+    retryDelay: (attempt) => Math.pow(2, attempt) * 1000, // 1s, 2s, 4s
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    onError: (err) => {
+      const message = axios.isAxiosError(err) && err.response?.status === 429
+        ? "Rate limit exceeded. Please try again later."
+        : "Failed to load elections. Please try again later.";
+      toast.error(message);
+    },
+  });
 
   useEffect(() => {
     document.title = "Elections | VoteChain";
-
-    const fetchElections = async (retries = 3) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response = await axios.get(`${API_URL}/elections`, {
-          timeout: 10000,
-        });
-        setElections(response.data);
-        console.log("Fetched elections:", response.data);
-      } catch (err) {
-        console.error("Error fetching elections:", err);
-        if (retries > 0 && axios.isAxiosError(err) && err.code === "ECONNABORTED") {
-          setTimeout(() => fetchElections(retries - 1), 2000);
-        } else {
-          setError("Failed to load elections. Please try again later.");
-          toast.error("Failed to load elections");
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchElections();
   }, []);
 
   const filteredElections = filter === "all"
@@ -244,7 +264,11 @@ const Elections = () => {
   if (error) {
     return (
       <div className="container mx-auto px-4 py-12 text-center">
-        <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+        <p className="text-red-600 dark:text-red-400 mb-4">
+          {axios.isAxiosError(error) && error.response?.status === 429
+            ? "Rate limit exceeded. Please try again later."
+            : "Failed to load elections. Please try again later."}
+        </p>
         <Button variant="outline" onClick={() => window.location.reload()}>
           Retry
         </Button>
@@ -270,7 +294,7 @@ const Elections = () => {
       <div className="flex justify-center mb-8">
         <div className="inline-flex border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
           {["all", "active", "upcoming", "ended"].map((status) => (
-            <button
+            <Button
               key={status}
               onClick={() => setFilter(status as "all" | "active" | "upcoming" | "ended")}
               className={`px-4 py-2 text-sm font-medium ${
@@ -281,7 +305,7 @@ const Elections = () => {
               aria-pressed={filter === status}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

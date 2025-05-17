@@ -14,7 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const KYCPage = () => {
-  const { account, fetchKycStatus, kycStatus } = useWeb3();
+  const { account, fetchKycStatus, kycStatus }: { account: string; fetchKycStatus: () => void; kycStatus: { status: 'not submitted' | 'pending' | 'approved' | 'rejected' | 'received'; submittedAt?: string | Date; feedback?: string } } = useWeb3();
   const [files, setFiles] = useState({
     idFront: null,
     idBack: null,
@@ -476,7 +476,8 @@ const KYCPage = () => {
                         !files.idFront || 
                         !files.idBack || 
                         isSubmitting || 
-                        !account || 
+                        !account ||
+                        kycStatus.status === 'received' || 
                         kycStatus.status === 'approved' || 
                         kycStatus.status === 'pending'
                       } 
@@ -491,6 +492,12 @@ const KYCPage = () => {
                       </p>
                     )}
                     
+                    {kycStatus.status === 'received' && (
+                      <p className="text-sm text-blue-500 mt-2">
+                        Your KYC is under review. Please wait for approval.
+                      </p>
+                    )}
+
                     {kycStatus.status === 'pending' && (
                       <p className="text-sm text-yellow-500 mt-2">
                         Your KYC is already under review. Please wait for approval.
