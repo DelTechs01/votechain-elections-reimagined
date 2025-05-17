@@ -1,4 +1,4 @@
-const Joi = require("joi");
+const Joi = require("zod");
 const kycService = require("./kyc.service");
 const multer = require("multer");
 

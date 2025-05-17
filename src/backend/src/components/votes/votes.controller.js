@@ -1,14 +1,14 @@
-const Joi = require("joi");
+const Zod = require("zod");
 const votesService = require("./votes.service");
 
 const castVote = async (req, res, next) => {
-  const schema = Joi.object({
-    from: Joi.string().required(),
-    functionSignature: Joi.string().required(),
-    nonce: Joi.number().required(),
-    r: Joi.string().required(),
-    s: Joi.string().required(),
-    v: Joi.number().required(),
+  const schema = Zod.ZodIntersection.object({
+    from: Zod.string().required(),
+    functionSignature: Zod.string().required(),
+    nonce: Zod.number().required(),
+    r: Zod.string().required(),
+    s: Zod.string().required(),
+    v: Zod.number().required(),
   });
   try {
     await schema.validateAsync(req.body);

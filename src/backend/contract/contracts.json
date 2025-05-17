@@ -1,0 +1,20 @@
+{
+  "President": {
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "abi": [
+      {
+        "inputs": [],
+        "name": "getPresident",
+        "outputs": [
+          {
+            "internalType": "string",
+            "name": "",
+            "type": "string"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+      }
+    ]
+  }
+}

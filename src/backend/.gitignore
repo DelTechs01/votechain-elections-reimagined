@@ -1,5 +1,4 @@
 node_modules
-
 # Hardhat files
 /cache
 /artifacts
@@ -14,9 +13,14 @@ node_modules
 
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-31337
-#ignore dump files
-dump
-/votechain
 
-#environments
+#environment files
 .env
+# dotenv files
+.env.local
+.env.development.local
+
+#dump files
+/dump.json
+dump
+

@@ -1,4 +1,4 @@
-const Joi = require("joi");
+const Zod = require("zod");
 const candidatesService = require("./candidates.service");
 
 const getCandidates = async (req, res, next) => {
@@ -29,13 +29,13 @@ const getCandidatesByDepartment = async (req, res, next) => {
 };
 
 const addCandidate = async (req, res, next) => {
-  const schema = Joi.object({
-    name: Joi.string().required(),
-    party: Joi.string().optional(),
-    position: Joi.string().required(),
-    imageUrl: Joi.string().optional(),
-    bio: Joi.string().optional(),
-    onChainId: Joi.number().required(),
+  const schema = Zod.object({
+    name: Zod.string().required(),
+    party: Zod.string().optional(),
+    position: Zod.string().required(),
+    imageUrl: Zod.string().optional(),
+    bio: Zod.string().optional(),
+    onChainId: Zod.number().required(),
   });
   try {
     await schema.validateAsync(req.body);
@@ -47,12 +47,12 @@ const addCandidate = async (req, res, next) => {
 };
 
 const updateCandidate = async (req, res, next) => {
-  const schema = Joi.object({
-    name: Joi.string().optional(),
-    party: Joi.string().optional(),
-    position: Joi.string().optional(),
-    imageUrl: Joi.string().optional(),
-    bio: Joi.string().optional(),
+  const schema = Zod.object({
+    name: Zod.string().optional(),
+    party: Zod.string().optional(),
+    position: Zod.string().optional(),
+    imageUrl: Zod.string().optional(),
+    bio: Zod.string().optional(),
   });
   try {
     await schema.validateAsync(req.body);
