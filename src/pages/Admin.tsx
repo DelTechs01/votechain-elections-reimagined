@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import CandidatesPanel from "../components/admin/CandidatesPanel";
 import PositionsPanel from "../components/admin/positionsPanel";
-import KycPanel from "../components/admin/KycPanel";
+import KycPanel from "../components/admin/KYCPanel";
 import ElectionsPanel from "../components/admin/ElectionsPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
