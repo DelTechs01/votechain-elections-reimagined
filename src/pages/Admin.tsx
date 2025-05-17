@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import CandidatesPanel from "../components/admin/CandidatesPanel";
-import PositionsPanel from "../components/admin/PositionsPanel";
+import PositionsPanel from "../components/admin/positionsPanel";
 import KycPanel from "../components/admin/KycPanel";
 import ElectionsPanel from "../components/admin/ElectionsPanel";
 
