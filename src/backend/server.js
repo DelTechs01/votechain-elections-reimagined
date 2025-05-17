@@ -7,8 +7,11 @@ const fs = require("fs").promises;
 const dotenv = require("dotenv");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const { body, param, validationResult } = require("express-validator");
+const { body, param, query, validationResult } = require("express-validator");
 const logger = require("winston");
+const redis = require("redis");
+const http = require("http");
+const { Server } = require("socket.io");
 
 // Initialize environment variables
 dotenv.config();
@@ -26,7 +29,7 @@ logger.configure({
 });
 
 // Validate environment variables
-const requiredEnvVars = ["MONGODB_URI", "PORT", "ENABLE_CORS"];
+const requiredEnvVars = ["MONGODB_URI", "PORT", "FRONTEND_URL"];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
   logger.error(`Missing environment variables: ${missingEnvVars.join(", ")}`);
@@ -36,42 +39,52 @@ if (missingEnvVars.length > 0) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Redis client setup
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379",
+});
+redisClient.on("error", (err) => logger.error(`Redis error: ${err.message}`));
+redisClient.connect().then(() => logger.info("Redis connected"));
+
+// HTTP server for WebSocket
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+  },
+});
+
 // Middleware
-app.use(helmet()); // Secure HTTP headers
+app.use(helmet());
 app.use(
   cors({
-    origin:
-      process.env.ENABLE_CORS === "true"
-        ? "*"
-        : process.env.FRONTEND_URL || "http://localhost:8080",
+    origin: process.env.ENABLE_CORS === "true" ? "*" : process.env.FRONTEND_URL,
     credentials: true,
   })
 );
 app.use(express.json());
-
-// Rate limiting
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per window
+    max: 100,
   })
 );
 
 // MongoDB connection
 mongoose.set("strictQuery", true);
-
 const connectWithRetry = async () => {
   const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/votechain";
   let retries = 5;
-
   while (retries > 0) {
     try {
       await mongoose.connect(mongoURI, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
         serverSelectionTimeoutMS: 5000,
       });
       logger.info("MongoDB connected");
+      // Create indexes
+      await mongoose.model("KYC").createIndexes();
+      await mongoose.model("Vote").createIndexes();
       return;
     } catch (err) {
       retries -= 1;
@@ -84,9 +97,7 @@ const connectWithRetry = async () => {
     }
   }
 };
-
 connectWithRetry();
-
 mongoose.connection.on("error", (err) => {
   logger.error(`MongoDB connection error: ${err.message}`);
   connectWithRetry();
@@ -100,12 +111,15 @@ const kycSchema = new mongoose.Schema({
   profilePicturePath: String,
   status: {
     type: String,
-    enum: ["pending", "approved", "rejected"],
-    default: "pending",
+    enum: ["Pending", "Approved", "Rejected", "Received", "NotSubmitted"],
+    default: "Received",
   },
   feedback: String,
   createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date },
 });
+kycSchema.index({ createdAt: -1 });
+kycSchema.index({ status: 1 });
 
 const positionSchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true },
@@ -131,6 +145,7 @@ const voteSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   txHash: String,
 });
+voteSchema.index({ voterAddress: 1, position: 1, electionId: 1 }, { unique: true });
 
 const electionSettingsSchema = new mongoose.Schema({
   startTime: { type: Date, required: true },
@@ -163,9 +178,7 @@ const Vote = mongoose.model("Vote", voteSchema);
 const ElectionSettings = mongoose.model("ElectionSettings", electionSettingsSchema);
 const Election = mongoose.model("Election", electionSchema);
 
-voteSchema.index({ voterAddress: 1, position: 1, electionId: 1 }, { unique: true });
-
-// Multer storage for KYC documents
+// Multer storage
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadDir = path.join(__dirname, "uploads");
@@ -174,13 +187,14 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `id-${uniqueSuffix}${path.extname(file.originalname)}`);
+    const safeFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_");
+    cb(null, `id-${uniqueSuffix}-${safeFileName}`);
   },
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ["image/jpeg", "image/png", "application/pdf"];
     if (allowedTypes.includes(file.mimetype)) {
@@ -195,13 +209,13 @@ const upload = multer({
   { name: "profilePicture", maxCount: 1 },
 ]);
 
-// Utility to clean up uploaded files
+// Cleanup utility
 const cleanupFiles = async (files) => {
   if (!files) return;
   for (const field in files) {
     for (const file of files[field]) {
       try {
-        await fs.unlink(file.path);
+        await fs.unlink(file.path).catch(() => {});
       } catch (err) {
         logger.error(`Error deleting file ${file.path}: ${err.message}`);
       }
@@ -209,7 +223,7 @@ const cleanupFiles = async (files) => {
   }
 };
 
-// Middleware to handle validation errors
+// Validation middleware
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -239,25 +253,41 @@ app.post(
       }
 
       const existingKYC = await KYC.findOne({ walletAddress });
-      if (existingKYC) {
+      if (existingKYC && ["Pending", "Approved", "Received"].includes(existingKYC.status)) {
         await cleanupFiles(files);
         return res.status(400).json({
-          error: "KYC already submitted",
+          error: "KYC already submitted or approved",
           status: existingKYC.status,
         });
       }
 
-      const newKYC = new KYC({
+      const kycData = {
         walletAddress,
         idFrontPath: files.idFront[0].path,
         idBackPath: files.idBack[0].path,
         profilePicturePath: files.profilePicture?.[0]?.path,
-        status: "pending",
+        status: "Received",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const newKYC = existingKYC
+        ? await KYC.findOneAndUpdate({ walletAddress }, kycData, { new: true })
+        : await new KYC(kycData).save();
+
+      // Emit WebSocket event
+      io.emit("newKycSubmission", {
+        _id: newKYC._id,
+        walletAddress: newKYC.walletAddress,
+        status: newKYC.status,
+        createdAt: newKYC.createdAt,
       });
 
-      await newKYC.save();
+      // Invalidate cache
+      await redisClient.del(`kyc:*`);
+
       logger.info(`KYC submitted for wallet: ${walletAddress}`);
-      res.status(201).json({ message: "KYC submitted", status: "pending" });
+      res.status(201).json({ message: "KYC submitted successfully", status: newKYC.status });
     } catch (error) {
       await cleanupFiles(req.files);
       logger.error(`KYC submission error: ${error.message}`);
@@ -276,8 +306,10 @@ app.get(
   validate,
   async (req, res) => {
     try {
-      const kyc = await KYC.findOne({ walletAddress: req.params.walletAddress });
-      if (!kyc) return res.status(404).json({ error: "KYC not found" });
+      const kyc = await KYC.findOne({ walletAddress: req.params.walletAddress }).lean();
+      if (!kyc) {
+        return res.json({ status: "NotSubmitted", feedback: null, submittedAt: null });
+      }
       res.json({
         status: kyc.status,
         feedback: kyc.feedback,
@@ -290,22 +322,62 @@ app.get(
   }
 );
 
-app.get("/api/kyc/all", async (req, res) => {
-  try {
-    const kycSubmissions = await KYC.find().sort({ createdAt: -1 });
-    res.json(kycSubmissions);
-  } catch (error) {
-    logger.error(`Fetch all KYC error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch KYC submissions" });
+app.get(
+  "/api/kyc",
+  [
+    query("page").optional().isInt({ min: 1 }).withMessage("Page must be a positive integer"),
+    query("limit").optional().isInt({ min: 1, max: 100 }).withMessage("Limit must be between 1 and 100"),
+    query("sort").optional().isIn(["createdAt", "-createdAt", "status"]).withMessage("Invalid sort parameter"),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const sort = req.query.sort || "-createdAt";
+      const skip = (page - 1) * limit;
+
+      const cacheKey = `kyc:${page}:${limit}:${sort}`;
+      const cached = await redisClient.get(cacheKey);
+      if (cached) {
+        logger.info("Serving KYC from cache");
+        return res.json(JSON.parse(cached));
+      }
+
+      const kycSubmissions = await KYC.find()
+        .select("walletAddress status feedback createdAt updatedAt")
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await KYC.countDocuments();
+
+      const response = {
+        kycSubmissions,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      };
+
+      await redisClient.setEx(cacheKey, 30, JSON.stringify(response));
+      res.json(response);
+    } catch (error) {
+      logger.error(`Fetch all KYC error: ${error.message}`);
+      res.status(500).json({ error: "Failed to fetch KYC submissions" });
+    }
   }
-});
+);
 
 app.put(
   "/api/kyc/:id",
   [
     param("id").isMongoId().withMessage("Invalid KYC ID"),
     body("status")
-      .isIn(["received", "Approved", "rejected"])
+      .isIn(["Pending", "Approved", "Rejected", "Received"])
       .withMessage("Invalid status"),
     body("feedback").optional().isString().withMessage("Feedback must be a string"),
   ],
@@ -315,15 +387,51 @@ app.put(
       const { status, feedback } = req.body;
       const kyc = await KYC.findByIdAndUpdate(
         req.params.id,
-        { status, feedback },
+        { status, feedback, updatedAt: new Date() },
         { new: true }
-      );
+      ).lean();
       if (!kyc) return res.status(404).json({ error: "KYC not found" });
+
+      // Invalidate cache
+      await redisClient.del(`kyc:*`);
+
       logger.info(`KYC updated: ${req.params.id}, status: ${status}`);
       res.json(kyc);
     } catch (error) {
       logger.error(`Update KYC error: ${error.message}`);
       res.status(500).json({ error: "Failed to update KYC" });
+    }
+  }
+);
+
+app.put(
+  "/api/kyc/bulk",
+  [
+    body("ids").isArray().withMessage("IDs must be an array"),
+    body("ids.*").isMongoId().withMessage("Invalid KYC ID"),
+    body("status")
+      .isIn(["Pending", "Approved", "Rejected", "Received"])
+      .withMessage("Invalid status"),
+    body("feedback").optional().isString().withMessage("Feedback must be a string"),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const { ids, status, feedback } = req.body;
+      const result = await KYC.updateMany(
+        { _id: { $in: ids } },
+        { status, feedback, updatedAt: new Date() },
+        { new: true }
+      );
+
+      // Invalidate cache
+      await redisClient.del(`kyc:*`);
+
+      logger.info(`Bulk updated ${result.modifiedCount} KYC submissions to ${status}`);
+      res.json({ message: `Updated ${result.modifiedCount} KYC submissions` });
+    } catch (error) {
+      logger.error(`Bulk update KYC error: ${error.message}`);
+      res.status(500).json({ error: "Failed to update KYC submissions" });
     }
   }
 );
@@ -334,31 +442,25 @@ app.get(
   validate,
   async (req, res) => {
     try {
-      const kyc = await KYC.findById(req.params.id);
+      const kyc = await KYC.findById(req.params.id).lean();
       if (!kyc) return res.status(404).json({ error: "KYC not found" });
 
       const documents = [];
-      if (kyc.idFrontPath && (await fs.access(kyc.idFrontPath).then(() => true).catch(() => false))) {
-        documents.push({
-          type: "idFront",
-          data: await fs.readFile(kyc.idFrontPath, { encoding: "base64" }),
-          mimetype: kyc.idFrontPath.endsWith(".pdf") ? "application/pdf" : "image/jpeg",
-        });
-      }
-      if (kyc.idBackPath && (await fs.access(kyc.idBackPath).then(() => true).catch(() => false))) {
-        documents.push({
-          type: "idBack",
-          data: await fs.readFile(kyc.idBackPath, { encoding: "base64" }),
-          mimetype: kyc.idBackPath.endsWith(".pdf") ? "application/pdf" : "image/jpeg",
-        });
-      }
-      if (kyc.profilePicturePath && (await fs.access(kyc.profilePicturePath).then(() => true).catch(() => false))) {
-        documents.push({
-          type: "profilePicture",
-          data: await fs.readFile(kyc.profilePicturePath, { encoding: "base64" }),
-          mimetype: "image/jpeg",
-        });
-      }
+      const addDocument = async (type, filePath) => {
+        if (filePath && (await fs.access(filePath).then(() => true).catch(() => false))) {
+          documents.push({
+            type,
+            data: await fs.readFile(filePath, { encoding: "base64" }),
+            mimetype: filePath.endsWith(".pdf") ? "application/pdf" : "image/jpeg",
+          });
+        }
+      };
+
+      await Promise.all([
+        addDocument("idFront", kyc.idFrontPath),
+        addDocument("idBack", kyc.idBackPath),
+        addDocument("profilePicture", kyc.profilePicturePath),
+      ]);
 
       if (documents.length === 0) return res.status(404).json({ error: "No documents found" });
       res.json(documents);
@@ -370,15 +472,25 @@ app.get(
 );
 
 // Position Endpoints
-app.get("/api/positions", async (req, res) => {
-  try {
-    const positions = await Position.find({ isActive: true });
-    res.json(positions);
-  } catch (error) {
-    logger.error(`Fetch positions error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch positions" });
+app.get(
+  "/api/positions",
+  [
+    query("fields").optional().isString().withMessage("Fields must be a string"),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const fields = req.query.fields ? req.query.fields.split(",") : null;
+      const positions = await Position.find({ isActive: true })
+        .select(fields)
+        .lean();
+      res.json(positions);
+    } catch (error) {
+      logger.error(`Fetch positions error: ${error.message}`);
+      res.status(500).json({ error: "Failed to fetch positions" });
+    }
   }
-});
+);
 
 app.post(
   "/api/positions",
@@ -390,6 +502,10 @@ app.post(
   async (req, res) => {
     try {
       const { name, description } = req.body;
+      const existingPosition = await Position.findOne({ name }).lean();
+      if (existingPosition) {
+        return res.status(400).json({ error: "Position name already exists" });
+      }
       const newPosition = new Position({ name, description });
       await newPosition.save();
       logger.info(`Position created: ${name}`);
@@ -402,15 +518,26 @@ app.post(
 );
 
 // Candidate Endpoints
-app.get("/api/candidates", async (req, res) => {
-  try {
-    const candidates = await Candidate.find({ isActive: true }).populate("position");
-    res.json(candidates);
-  } catch (error) {
-    logger.error(`Fetch candidates error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch candidates" });
+app.get(
+  "/api/candidates",
+  [
+    query("fields").optional().isString().withMessage("Fields must be a string"),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const fields = req.query.fields ? req.query.fields.split(",") : null;
+      const candidates = await Candidate.find({ isActive: true })
+        .populate("position")
+        .select(fields)
+        .lean();
+      res.json(candidates);
+    } catch (error) {
+      logger.error(`Fetch candidates error: ${error.message}`);
+      res.status(500).json({ error: "Failed to fetch candidates" });
+    }
   }
-});
+);
 
 app.get(
   "/api/candidates/position/:position",
@@ -421,7 +548,7 @@ app.get(
       const candidates = await Candidate.find({
         position: req.params.position,
         isActive: true,
-      });
+      }).lean();
       res.json(candidates);
     } catch (error) {
       logger.error(`Fetch candidates by position error: ${error.message}`);
@@ -443,7 +570,7 @@ app.post(
   async (req, res) => {
     try {
       const { name, party, position, imageUrl, onChainId } = req.body;
-      if (!(await Position.findById(position))) {
+      if (!(await Position.findById(position).lean())) {
         return res.status(400).json({ error: "Invalid position" });
       }
       const candidate = new Candidate({
@@ -476,14 +603,14 @@ app.put(
   async (req, res) => {
     try {
       const { name, party, position, imageUrl } = req.body;
-      if (position && !(await Position.findById(position))) {
+      if (position && !(await Position.findById(position).lean())) {
         return res.status(400).json({ error: "Invalid position" });
       }
       const candidate = await Candidate.findByIdAndUpdate(
         req.params.id,
         { name, party, position, imageUrl },
         { new: true }
-      );
+      ).lean();
       if (!candidate) return res.status(404).json({ error: "Candidate not found" });
       logger.info(`Candidate updated: ${req.params.id}`);
       res.json(candidate);
@@ -500,7 +627,7 @@ app.delete(
   validate,
   async (req, res) => {
     try {
-      const candidate = await Candidate.findByIdAndDelete(req.params.id);
+      const candidate = await Candidate.findByIdAndDelete(req.params.id).lean();
       if (!candidate) return res.status(404).json({ error: "Candidate not found" });
       logger.info(`Candidate deleted: ${req.params.id}`);
       res.json({ message: "Candidate deleted" });
@@ -521,7 +648,7 @@ app.put(
         req.params.id,
         { isActive: false },
         { new: true }
-      );
+      ).lean();
       if (!candidate) return res.status(404).json({ error: "Candidate not found" });
       logger.info(`Candidate disqualified: ${req.params.id}`);
       res.json(candidate);
@@ -547,7 +674,7 @@ app.post(
   async (req, res) => {
     try {
       const { title, description, startDate, endDate, candidateIds } = req.body;
-      const candidates = await Candidate.find({ _id: { $in: candidateIds } });
+      const candidates = await Candidate.find({ _id: { $in: candidateIds } }).lean();
       if (candidates.length !== candidateIds.length) {
         return res.status(400).json({ error: "Invalid candidate IDs" });
       }
@@ -574,26 +701,37 @@ app.post(
   }
 );
 
-app.get("/api/elections", async (req, res) => {
-  try {
-    const elections = await Election.find().populate("candidates").lean();
-    const currentDate = new Date();
-    const updatedElections = elections.map((election) => ({
-      ...election,
-      status:
-        currentDate >= new Date(election.endDate)
-          ? "ended"
-          : currentDate >= new Date(election.startDate)
-          ? "active"
-          : "upcoming",
-      participantsCount: election.candidates.length,
-    }));
-    res.json(updatedElections);
-  } catch (error) {
-    logger.error(`Fetch elections error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch elections" });
+app.get(
+  "/api/elections",
+  [
+    query("fields").optional().isString().withMessage("Fields must be a string"),
+  ],
+  validate,
+  async (req, res) => {
+    try {
+      const fields = req.query.fields ? req.query.fields.split(",") : null;
+      const elections = await Election.find()
+        .populate("candidates")
+        .select(fields)
+        .lean();
+      const currentDate = new Date();
+      const updatedElections = elections.map((election) => ({
+        ...election,
+        status:
+          currentDate >= new Date(election.endDate)
+            ? "ended"
+            : currentDate >= new Date(election.startDate)
+            ? "active"
+            : "upcoming",
+        participantsCount: election.candidates.length,
+      }));
+      res.json(updatedElections);
+    } catch (error) {
+      logger.error(`Fetch elections error: ${error.message}`);
+      res.status(500).json({ error: "Failed to fetch elections" });
+    }
   }
-});
+);
 
 app.get(
   "/api/elections/:id",
@@ -633,19 +771,19 @@ app.post(
   async (req, res) => {
     try {
       const { voterAddress, candidateId, position, electionId } = req.body;
-      const election = await Election.findById(electionId);
+      const election = await Election.findById(electionId).lean();
       if (!election || election.status !== "active") {
         return res.status(400).json({ error: "Election not active" });
       }
-      const kyc = await KYC.findOne({ walletAddress: voterAddress });
-      if (!kyc || kyc.status !== "approved") {
+      const kyc = await KYC.findOne({ walletAddress: voterAddress }).lean();
+      if (!kyc || kyc.status !== "Approved") {
         return res.status(403).json({ error: "KYC not approved" });
       }
-      const candidate = await Candidate.findById(candidateId);
+      const candidate = await Candidate.findById(candidateId).lean();
       if (!candidate || !election.candidates.includes(candidateId)) {
         return res.status(400).json({ error: "Invalid candidate" });
       }
-      const existingVote = await Vote.findOne({ voterAddress, position, electionId });
+      const existingVote = await Vote.findOne({ voterAddress, position, electionId }).lean();
       if (existingVote) {
         return res.status(400).json({ error: "Already voted for this position" });
       }
@@ -674,14 +812,14 @@ app.get(
   async (req, res) => {
     try {
       const { account, electionId } = req.params;
-      const election = await Election.findById(electionId).populate("candidates");
+      const election = await Election.findById(electionId).populate("candidates").lean();
       if (!election) return res.status(404).json({ error: "Election not found" });
       const positions = [...new Set(election.candidates.map((c) => c.position.toString()))];
-      const votes = await Vote.find({ voterAddress: account, electionId });
+      const votes = await Vote.find({ voterAddress: account, electionId }).lean();
       const voteStatus = positions.map((positionId) => ({
         position:
-          election.candidates.find((c) => c.position.toString() === positionId)
-            ?.position?.name || positionId,
+          election.candidates.find((c) => c.position.toString() === positionId)?.position?.name ||
+          positionId,
         hasVoted: votes.some((v) => v.position.toString() === positionId),
       }));
       res.json(voteStatus);
@@ -693,16 +831,18 @@ app.get(
 );
 
 app.get("/api/votes/all", async (req, res) => {
-  try {
-    const votes = await Vote.find()
-      .populate("candidateId", "name party position")
-      .sort({ timestamp: -1 });
-    res.json(votes);
-  } catch (error) {
-    logger.error(`Fetch all votes error: ${error.message}`);
-    res.status(500).json({ error: "Failed to fetch votes" });
+    try {
+      const votes = await Vote.find()
+        .populate("candidateId", "name party position")
+        .sort({ timestamp: -1 })
+        .lean();
+      res.json(votes);
+    } catch (error) {
+      logger.error(`Fetch all votes error: ${error.message}`);
+      res.status(500).json({ error: "Failed to fetch votes" });
+    }
   }
-});
+);
 
 // Election Settings Endpoints
 app.post(
@@ -717,14 +857,18 @@ app.post(
   async (req, res) => {
     try {
       const { startTime, endTime, resultsPublished, realTimeResults } = req.body;
-      let settings = await ElectionSettings.findOne();
+      let settings = await ElectionSettings.findOne().lean();
       if (settings) {
-        Object.assign(settings, {
-          startTime: new Date(startTime),
-          endTime: new Date(endTime),
-          resultsPublished,
-          realTimeResults,
-        });
+        settings = await ElectionSettings.findOneAndUpdate(
+          {},
+          {
+            startTime: new Date(startTime),
+            endTime: new Date(endTime),
+            resultsPublished,
+            realTimeResults,
+          },
+          { new: true }
+        );
       } else {
         settings = new ElectionSettings({
           startTime: new Date(startTime),
@@ -732,8 +876,8 @@ app.post(
           resultsPublished,
           realTimeResults,
         });
+        await settings.save();
       }
-      await settings.save();
       logger.info("Election settings updated");
       res.json(settings);
     } catch (error) {
@@ -745,7 +889,7 @@ app.post(
 
 app.get("/api/election/settings", async (req, res) => {
   try {
-    const settings = await ElectionSettings.findOne();
+    const settings = await ElectionSettings.findOne().lean();
     if (!settings) return res.status(404).json({ error: "Election settings not found" });
     res.json(settings);
   } catch (error) {
@@ -765,12 +909,12 @@ app.get(
   async (req, res) => {
     try {
       const { voterAddress } = req.params;
-      const settings = await ElectionSettings.findOne();
+      const settings = await ElectionSettings.findOne().lean();
       if (!settings) return res.status(404).json({ error: "Election settings not found" });
       if (settings.resultsPublished || settings.realTimeResults) {
         return res.json({ canView: true });
       }
-      const vote = await Vote.findOne({ voterAddress });
+      const vote = await Vote.findOne({ voterAddress }).lean();
       res.json({ canView: !!vote });
     } catch (error) {
       logger.error(`Check result visibility error: ${error.message}`);
@@ -789,7 +933,9 @@ app.get(
       const candidates = await Candidate.find({
         position: req.params.position,
         isActive: true,
-      }).sort({ voteCount: -1 });
+      })
+        .sort({ voteCount: -1 })
+        .lean();
       res.json(candidates);
     } catch (error) {
       logger.error(`Fetch election results error: ${error.message}`);
@@ -803,6 +949,7 @@ app.get("/api/healthcheck", (req, res) => {
   res.json({
     status: "ok",
     dbStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    redisStatus: redisClient.isOpen ? "connected" : "disconnected",
     timestamp: new Date().toISOString(),
   });
 });
@@ -825,131 +972,18 @@ app.use((err, req, res, next) => {
 });
 
 // Graceful shutdown
-const gracefulShutdown = () => {
+const gracefulShutdown = async () => {
   logger.info("Received shutdown signal. Closing connections...");
-  mongoose.connection.close(() => {
-    logger.info("MongoDB connection closed");
-    process.exit(0);
-  });
+  await redisClient.quit();
+  await mongoose.connection.close();
+  logger.info("MongoDB and Redis connections closed");
+  process.exit(0);
 };
 
 process.on("SIGINT", gracefulShutdown);
 process.on("SIGTERM", gracefulShutdown);
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// const express = require("express");
-// const mongoose = require("mongoose");
-// const cors = require("cors");
-// const { errorHandler } = require("./middleware/error");
-// require("dotenv").config();
-
-// // Initialize Express app
-// const app = express();
-// const PORT = process.env.PORT || 5000;
-
-// // Middleware
-// app.use(cors({
-//   origin: process.env.ENABLE_CORS === "true" ? "*" : process.env.FRONTEND_URL || "http://localhost:3000",
-//   credentials: true,
-// }));
-// app.use(express.json());
-
-// // MongoDB Connection with Retry
-// const connectWithRetry = () => {
-//   console.log("MongoDB connection with retry");
-//   const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/votechain";
-//   mongoose
-//     .connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true })
-//     .then(() => console.log(`MongoDB connected: ${mongoURI}`))
-//     .catch((err) => {
-//       console.error("MongoDB connection error:", err);
-//       setTimeout(connectWithRetry, 5000);
-//     });
-// };
-// connectWithRetry();
-// mongoose.connection.on("error", (err) => {
-//   console.error("MongoDB connection error:", err);
-//   setTimeout(connectWithRetry, 5000);
-// });
-// process.on("SIGINT", () => {
-//   mongoose.connection.close(() => {
-//     console.log("MongoDB connection closed");
-//     process.exit(0);
-//   });
-// });
-
-// // Routes
-// const adminRouter = require("./admin/admin.router");
-// const kycRouter = require("./kyc/kyc.router");
-// const candidatesRouter = require("./candidates/candidates.router");
-// const votesRouter = require("./votes/votes.router");
-// const positionsRouter = require("./positions/positions.router");
-// const electionRouter = require("./election/election.router");
-// const voterRouter = require("./voter/voter.router");
-
-// app.use("/api/admin", adminRouter);
-// app.use("/api/kyc", kycRouter);
-// app.use("/api/candidates", candidatesRouter);
-// app.use("/api/votes", votesRouter);
-// app.use("/api/positions", positionsRouter);
-// app.use("/api/election", electionRouter);
-// app.use("/api/voter", voterRouter);
-
-// // Health Check
-// app.get("/api/healthcheck", (req, res) => {
-//   res.status(200).json({
-//     status: "ok",
-//     dbStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-//     timestamp: new Date().toISOString(),
-//   });
-// });
-
-// // Error Handler
-// app.use(errorHandler);
-
-// // Start Server
-// app.listen(PORT, () => {
-//   console.log(`Server running on port ${PORT}`);
-//   console.log(`API URL: http://localhost:${PORT}/api`);
-// });
