@@ -1,7 +1,3 @@
-import CandidatesPanel from "../components/admin/CandidatesPanel";
-import PositionsPanel from "../components/admin/positionsPanel";
-import KycPanel from "../components/admin/KYCPanel";
-import ElectionsPanel from "../components/admin/ElectionsPanel";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
 import {
@@ -12,70 +8,43 @@ import {
   Award,
   Calendar,
 } from "lucide-react";
-import { useWeb3 } from "@/context/Web3Context";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { useWeb3 } from "../context/Web3Context";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
+import { TooltipProvider } from "../components/ui/tooltip";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import CandidatesPanel from "../components/admin/CandidatesPanel";
+import PositionsPanel from "../components/admin/positionsPanel";
+import KycPanel from "../components/admin/KYCPanel";
+import ElectionsPanel from "../components/admin/ElectionsPanel";
 import { API_URL } from "../components/admin/config";
-
-// Ensure all API calls use fetchWithBackoff for consistent retry logic
-const fetchWithBackoff = async (url, retries = 3, delay = 1000) => {
-  try {
-    const response = await axios.get(url);
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 429 && retries > 0) {
-      // Wait for the specified delay before retrying
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      // Retry with reduced retries and increased delay (exponential backoff)
-      return fetchWithBackoff(url, retries - 1, delay * 2);
-    }
-    throw error; // Rethrow other errors or if retries are exhausted
-  }
-};
+import { useApi } from "../utils/api";
+import { Candidate, Position, KycSubmission, Election } from "../adminTypes";
 
 const Admin = () => {
   const { account, isAdmin } = useWeb3();
+  const { get } = useApi();
 
-  // Fetch data with React Query, with retry delay and backoff
-  const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
-    queryKey: ["positions"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/positions`),
-    enabled: !!account,
-    retry: 2, // Limit retries to 2
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000, // Exponential backoff: 1s, 2s, 4s
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-  });
+  // Fetch all data centrally
+  const { data: positions = [], isLoading: isLoadingPositions } = get<Position[]>(
+    `${API_URL}/positions`,
+    ["positions"]
+  );
 
-  const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
-    queryKey: ["candidates"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/candidates`),
-    enabled: !!account,
-    retry: 2,
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: candidates = [], isLoading: isLoadingCandidates } = get<Candidate[]>(
+    `${API_URL}/candidates`,
+    ["candidates"]
+  );
 
-  const { data: kycSubmissions = [], isLoading: isLoadingKyc } = useQuery({
-    queryKey: ["kycSubmissions"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/kyc/all`),
-    enabled: !!account,
-    retry: 2,
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: kycSubmissions = [], isLoading: isLoadingKyc } = get<KycSubmission[]>(
+    `${API_URL}/kyc/all`,
+    ["kycSubmissions"]
+  );
 
-  const { data: elections = [], isLoading: isLoadingElections } = useQuery({
-    queryKey: ["elections"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/elections`),
-    enabled: !!account,
-    retry: 2,
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: elections = [], isLoading: isLoadingElections } = get<Election[]>(
+    `${API_URL}/elections`,
+    ["elections"]
+  );
 
   useEffect(() => {
     document.title = "Admin | VoteChain";
@@ -149,20 +118,19 @@ const Admin = () => {
               ))}
             </TabsList>
 
-            <TabsContent value="candidates">
-              <CandidatesPanel candidates={candidates} />
-            </TabsContent>
-
+            <CandidatesPanel
+              candidates={candidates}
+              positions={positions}
+              isLoading={isLoading}
+            />
             <TabsContent value="positions">
-              <PositionsPanel positions={positions} />
+              <PositionsPanel positions={positions} isLoading={isLoading} />
             </TabsContent>
-
             <TabsContent value="kyc">
-              <KycPanel kycSubmissions={kycSubmissions} />
+              <KycPanel kycSubmissions={kycSubmissions} isLoading={isLoading} />
             </TabsContent>
-
             <TabsContent value="elections">
-              <ElectionsPanel elections={elections} />
+              <ElectionsPanel elections={elections} isLoading={isLoading} />
             </TabsContent>
           </Tabs>
         </motion.div>

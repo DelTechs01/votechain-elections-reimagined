@@ -1,24 +1,14 @@
-import { API_URL } from "./config";
 import { useState } from "react";
-import { Candidate, Position } from "./adminTypes";
-import { candidateSchema } from "./adminSchema";
+import { Candidate, Position } from "../../adminTypes";
+import { candidateSchema } from "../../adminSchema";
 import { z } from "zod";
 import { useAccount } from "wagmi";
 import { useForm } from "react-hook-form";
-import { TabsContent } from "../ui/tabs";
+import { TabsContent } from "../../ui/tabs";
 import {
   Plus,
   Pencil,
-  Check,
-  AlertCircle,
-  Shield,
-  User,
-  Users,
-  Award,
-  FileImage,
   Trash2,
-  Calendar,
-  ZoomIn,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog";
+} from "../../ui/dialog";
 import {
   Form,
   FormControl,
@@ -37,15 +27,15 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "../ui/form";
-import { Input } from "../ui/input";
+} from "../../ui/form";
+import { Input } from "../../ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from "../../ui/select";
 import {
   Table,
   TableBody,
@@ -53,55 +43,33 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../ui/table";
+} from "../../ui/table";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "../ui/tooltip";
-import { toast } from "sonner";
+} from "../../ui/tooltip";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
+import { Button } from "../../ui/button";
+import { Card, CardContent } from "../../ui/card";
+import { API_URL } from "./config";
+import { useApi } from "../../utils/api";
 
-// Custom fetch function with exponential backoff for 429 errors
-const fetchWithBackoff = async (url, retries = 3, delay = 1000) => {
-  try {
-    const response = await axios.get(url);
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 429 && retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return fetchWithBackoff(url, retries - 1, delay * 2);
-    }
-    throw error;
-  }
-};
+interface CandidatesPanelProps {
+  candidates: Candidate[];
+  positions: Position[];
+  isLoading: boolean;
+}
 
-// Custom mutation function with backoff
-const mutateWithBackoff = async (url, method, data, retries = 3, delay = 1000) => {
-  try {
-    const response = await axios({ url, method, data });
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 429 && retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return mutateWithBackoff(url, method, data, retries - 1, delay * 2);
-    }
-    throw error;
-  }
-};
-
-const CandidatesPanel = () => {
-  const queryClient = useQueryClient();
+const CandidatesPanel = ({ candidates, positions, isLoading }: CandidatesPanelProps) => {
   const { address: account } = useAccount();
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
   const [isEditingCandidate, setIsEditingCandidate] = useState(false);
   const [isDeletingCandidate, setIsDeletingCandidate] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+
+  const { mutate } = useApi();
 
   const candidateForm = useForm<z.infer<typeof candidateSchema>>({
     resolver: zodResolver(candidateSchema),
@@ -113,86 +81,24 @@ const CandidatesPanel = () => {
     },
   });
 
-  // Fetch data with React Query
-  const { data: positions = [], isLoading: isLoadingPositions } = useQuery({
-    queryKey: ["positions"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/positions`),
-    enabled: !!account,
-    retry: 2,
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    onError: () => toast.error("Failed to fetch positions. Please try again later."),
-  });
+  // Mutations
+  const addCandidate = mutate<void, z.infer<typeof candidateSchema>>(
+    `${API_URL}/candidates`,
+    "post",
+    "Candidate added successfully"
+  );
 
-  const { data: candidates = [], isLoading: isLoadingCandidates } = useQuery({
-    queryKey: ["candidates"],
-    queryFn: () => fetchWithBackoff(`${API_URL}/candidates`),
-    enabled: !!account,
-    retry: 2,
-    retryDelay: (attempt) => Math.pow(2, attempt) * 1000,
-    staleTime: 5 * 60 * 1000,
-    onError: () => toast.error("Failed to fetch candidates. Please try again later."),
-  });
+  const updateCandidate = mutate<void, z.infer<typeof candidateSchema>>(
+    `${API_URL}/candidates/${selectedCandidate?._id}`,
+    "put",
+    "Candidate updated successfully"
+  );
 
-  // Mutation for adding candidate
-  const addCandidate = useMutation({
-    mutationFn: (values: z.infer<typeof candidateSchema>) =>
-      mutateWithBackoff(`${API_URL}/candidates`, "post", values),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["candidates"] });
-      toast.success("Candidate added successfully");
-      candidateForm.reset();
-    },
-    onError: (error) => {
-      if (axios.isAxiosError(error)) {
-        toast.error(error.response?.data?.error || "Failed to add candidate");
-      } else {
-        toast.error("Failed to add candidate");
-      }
-    },
-    onSettled: () => setIsAddingCandidate(false),
-  });
-
-  // Mutation for updating candidate
-  const updateCandidate = useMutation({
-    mutationFn: (values: z.infer<typeof candidateSchema>) =>
-      mutateWithBackoff(`${API_URL}/candidates/${selectedCandidate?._id}`, "put", values),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["candidates"] });
-      toast.success("Candidate updated successfully");
-      candidateForm.reset();
-      setSelectedCandidate(null);
-    },
-    onError: (error) => {
-      if (axios.isAxiosError(error)) {
-        toast.error(error.response?.data?.error || "Failed to update candidate");
-      } else {
-        toast.error("Failed to update candidate");
-      }
-    },
-    onSettled: () => setIsEditingCandidate(false),
-  });
-
-  // Mutation for deleting candidate
-  const deleteCandidate = useMutation({
-    mutationFn: (candidateId: string) =>
-      mutateWithBackoff(`${API_URL}/candidates/${candidateId}`, "delete", null),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["candidates"] });
-      toast.success("Candidate deleted successfully");
-    },
-    onError: (error) => {
-      if (axios.isAxiosError(error)) {
-        toast.error(error.response?.data?.error || "Failed to delete candidate");
-      } else {
-        toast.error("Failed to delete candidate");
-      }
-    },
-    onSettled: () => setIsDeletingCandidate(false),
-  });
-
-  // Aggregate loading state
-  const isLoading = isLoadingPositions || isLoadingCandidates;
+  const deleteCandidate = mutate<void, void>(
+    `${API_URL}/candidates/${selectedCandidate?._id}`,
+    "delete",
+    "Candidate deleted successfully"
+  );
 
   if (isLoading) {
     return (
@@ -227,7 +133,12 @@ const CandidatesPanel = () => {
               <form
                 onSubmit={candidateForm.handleSubmit((values) => {
                   setIsAddingCandidate(true);
-                  addCandidate.mutate(values);
+                  addCandidate.mutate(values, {
+                    onSettled: () => {
+                      setIsAddingCandidate(false);
+                      candidateForm.reset();
+                    },
+                  });
                 })}
                 className="space-y-6"
               >
@@ -316,10 +227,10 @@ const CandidatesPanel = () => {
                 <DialogFooter>
                   <Button
                     type="submit"
-                    disabled={isAddingCandidate || !positions.length}
+                    disabled={addCandidate.isLoading || !positions.length}
                     className="w-full sm:w-auto"
                   >
-                    {isAddingCandidate ? "Adding..." : "Add Candidate"}
+                    {addCandidate.isLoading ? "Adding..." : "Add Candidate"}
                   </Button>
                 </DialogFooter>
               </form>
@@ -409,7 +320,13 @@ const CandidatesPanel = () => {
                                 <form
                                   onSubmit={candidateForm.handleSubmit((values) => {
                                     setIsEditingCandidate(true);
-                                    updateCandidate.mutate(values);
+                                    updateCandidate.mutate(values, {
+                                      onSettled: () => {
+                                        setIsEditingCandidate(false);
+                                        setSelectedCandidate(null);
+                                        candidateForm.reset();
+                                      },
+                                    });
                                   })}
                                   className="space-y-6"
                                 >
@@ -494,10 +411,10 @@ const CandidatesPanel = () => {
                                   <DialogFooter>
                                     <Button
                                       type="submit"
-                                      disabled={isEditingCandidate || !positions.length}
+                                      disabled={updateCandidate.isLoading || !positions.length}
                                       className="w-full sm:w-auto"
                                     >
-                                      {isEditingCandidate ? "Updating..." : "Update Candidate"}
+                                      {updateCandidate.isLoading ? "Updating..." : "Update Candidate"}
                                     </Button>
                                   </DialogFooter>
                                 </form>
@@ -538,11 +455,18 @@ const CandidatesPanel = () => {
                               <DialogFooter>
                                 <Button
                                   variant="destructive"
-                                  onClick={() => deleteCandidate.mutate(candidate._id)}
-                                  disabled={isDeletingCandidate}
+                                  onClick={() => {
+                                    deleteCandidate.mutate(undefined, {
+                                      onSettled: () => {
+                                        setIsDeletingCandidate(false);
+                                        setSelectedCandidate(null);
+                                      },
+                                    });
+                                  }}
+                                  disabled={deleteCandidate.isLoading}
                                   className="w-full sm:w-auto"
                                 >
-                                  {isDeletingCandidate ? "Deleting..." : "Delete"}
+                                  {deleteCandidate.isLoading ? "Deleting..." : "Delete"}
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -639,7 +563,13 @@ const CandidatesPanel = () => {
                             <form
                               onSubmit={candidateForm.handleSubmit((values) => {
                                 setIsEditingCandidate(true);
-                                updateCandidate.mutate(values);
+                                updateCandidate.mutate(values, {
+                                  onSettled: () => {
+                                    setIsEditingCandidate(false);
+                                    setSelectedCandidate(null);
+                                    candidateForm.reset();
+                                  },
+                                });
                               })}
                               className="space-y-6"
                             >
@@ -721,10 +651,10 @@ const CandidatesPanel = () => {
                               <DialogFooter>
                                 <Button
                                   type="submit"
-                                  disabled={isEditingCandidate || !positions.length}
+                                  disabled={updateCandidate.isLoading || !positions.length}
                                   className="w-full"
                                 >
-                                  {isEditingCandidate ? "Updating..." : "Update Candidate"}
+                                  {updateCandidate.isLoading ? "Updating..." : "Update Candidate"}
                                 </Button>
                               </DialogFooter>
                             </form>
@@ -760,11 +690,18 @@ const CandidatesPanel = () => {
                           <DialogFooter>
                             <Button
                               variant="destructive"
-                              onClick={() => deleteCandidate.mutate(candidate._id)}
-                              disabled={isDeletingCandidate}
+                              onClick={() => {
+                                deleteCandidate.mutate(undefined, {
+                                  onSettled: () => {
+                                    setIsDeletingCandidate(false);
+                                    setSelectedCandidate(null);
+                                  },
+                                });
+                              }}
+                              disabled={deleteCandidate.isLoading}
                               className="w-full"
                             >
-                              {isDeletingCandidate ? "Deleting..." : "Delete"}
+                              {deleteCandidate.isLoading ? "Deleting..." : "Delete"}
                             </Button>
                             <Button
                               variant="outline"
