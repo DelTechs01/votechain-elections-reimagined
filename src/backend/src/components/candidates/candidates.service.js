@@ -1,7 +1,7 @@
 const Candidate = require("../models/candidate.model");
 const Position = require("../models/position.model");
-const ethers = require("ethers");
-const contracts = require("../contracts.json");
+const {ethers} = require("ethers");
+const contracts = require("../../../contract/contracts.json");
 
 const provider = new ethers.providers.JsonRpcProvider(process.env.ETHEREUM_NODE_URL);
 const contractABI = [

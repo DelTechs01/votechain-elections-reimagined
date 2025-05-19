@@ -1072,3 +1072,117 @@ process.on("SIGTERM", gracefulShutdown);
 server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// const express = require("express");
+// const mongoose = require("mongoose");
+// const cors = require("cors");
+// const { errorHandler } = require("./src/components/middleware/error");
+// require("dotenv").config();
+
+// // Initialize Express app
+// const app = express();
+// const PORT = process.env.PORT || 5000;
+
+// // Middleware
+// app.use(cors({
+//   origin: process.env.ENABLE_CORS === "true" ? "*" : process.env.FRONTEND_URL || "http://localhost:3000",
+//   credentials: true,
+// }));
+// app.use(express.json());
+
+// // MongoDB Connection with Retry
+// const connectWithRetry = () => {
+//   console.log("MongoDB connection with retry");
+//   const mongoURI = process.env.MONGODB_URI;
+//   mongoose
+//     .connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true })
+//     .then(() => console.log(`MongoDB connected: ${mongoURI}`))
+//     .catch((err) => {
+//       console.error("MongoDB connection error:", err);
+//       setTimeout(connectWithRetry, 5000);
+//     });
+// };
+// connectWithRetry();
+// mongoose.connection.on("error", (err) => {
+//   console.error("MongoDB connection error:", err);
+//   setTimeout(connectWithRetry, 5000);
+// });
+// process.on("SIGINT", () => {
+//   mongoose.connection.close(() => {
+//     console.log("MongoDB connection closed");
+//     process.exit(0);
+//   });
+// });
+
+// // Routes
+// const adminRouter = require("./src/components/admin/admin.router");
+// const kycRouter = require("./src/components/kyc/kyc.router");
+// const candidatesRouter = require("./src/components/candidates/candidates.router");
+// const votesRouter = require("./src/components/votes/votes.router");
+// const positionsRouter = require("./src/components/positions/positions.router");
+// const electionRouter = require("./src/components/election/election.router");
+// const voterRouter = require("./src/components/voter/voter.router");npm 
+
+// app.use("/api/admin", adminRouter);
+// app.use("/api/kyc", kycRouter);
+// app.use("/api/candidates", candidatesRouter);
+// app.use("/api/votes", votesRouter);
+// app.use("/api/positions", positionsRouter);
+// app.use("/api/election", electionRouter);
+// app.use("/api/voter", voterRouter);
+
+// // Health Check
+// app.get("/api/healthcheck", (req, res) => {
+//   res.status(200).json({
+//     status: "ok",
+//     dbStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+//     timestamp: new Date().toISOString(),
+//   });
+// });
+
+// // Error Handler
+// app.use(errorHandler);
+
+// // Start Server
+// app.listen(PORT, () => {
+//   console.log(`Server running on port ${PORT}`);
+//   console.log(`API URL: http://localhost:${PORT}/api`);
+// });
+
