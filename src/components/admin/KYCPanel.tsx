@@ -78,7 +78,7 @@ const KycPanel = () => {
   //form
   const kycForm = useForm<z.infer<typeof kycUpdateSchema>>({
     resolver: zodResolver(kycUpdateSchema),
-    defaultValues: { status: "approved", feedback: "" },
+    defaultValues: { status: "Approved", feedback: "" }, // Fix: must match z.enum(["Approved", "rejected"])
   });
 
   //fetch data with react query
@@ -98,8 +98,13 @@ const KycPanel = () => {
       setDocumentPreviews({});
       kycForm.reset();
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.error || "Failed to update KYC");
+    onError: (error: unknown) => {
+      // Fix: avoid 'any' type
+      if (axios.isAxiosError(error)) {
+        toast.error(error.response?.data?.error || "Failed to update KYC");
+      } else {
+        toast.error("Failed to update KYC");
+      }
     },
   });
 
